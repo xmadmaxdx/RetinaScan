@@ -10,12 +10,10 @@ class CoralOrdinalHead(nn.Module):
     def __init__(self, input_dim, num_tasks=4):
         super().__init__()
         self.num_tasks = num_tasks
-        self.linear = nn.Linear(input_dim, 1)
-        self.biases = nn.Parameter(torch.zeros(num_tasks))
+        self.linear = nn.Linear(input_dim, num_tasks)
 
     def forward(self, x):
-        shared = self.linear(x)
-        return shared + self.biases
+        return self.linear(x)
 
     def predict(self, x, threshold=0.0):
         logits = self.forward(x)
