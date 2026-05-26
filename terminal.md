@@ -34,6 +34,18 @@ drive.mount('/content/drive')
 ```
 
 ### 5. Install Kaggle CLI & download EyePACS
+
+**Method A — Token auth (new, recommended):**
+```python
+# Paste your token here
+import os
+os.environ["KAGGLE_API_TOKEN"] = "KGAT_your_token_here"
+!pip install kaggle>=2.0.0
+!kaggle competitions download -c diabetic-retinopathy-detection -p data/raw/
+!unzip -q "data/raw/diabetic-retinopathy-detection.zip" -d data/raw/
+```
+
+**Method B — File auth (legacy):**
 ```bash
 !pip install kaggle==1.6.14
 !mkdir -p ~/.kaggle
