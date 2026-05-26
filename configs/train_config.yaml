@@ -28,7 +28,7 @@ model:
     - "proliferative diabetic retinopathy with neovascularization, vitreous hemorrhage, and high-risk characteristics"
 
 training:
-  epochs: 15
+  epochs: 10
   batch_size: 32
   learning_rate: 0.0001
   weight_decay: 0.0001
