@@ -112,10 +112,12 @@ Both heads share the same learned projection features, so the interpretability o
 
 | Metric | Zero-Shot | With Projection Tuning |
 |--------|-----------|----------------------|
-| Accuracy | TBD | TBD |
-| Quadratic Kappa | TBD | TBD |
-| F1 (weighted) | TBD | TBD |
-| Uncertainty Calibration | — | Outputs confidence per prediction |
+| Accuracy | 72.62% | TBD |
+| Quadratic Kappa | 0.0169 | TBD |
+| F1 (weighted) | 0.6240 | TBD |
+| ECE (calibration) | 0.4764 | TBD |
+
+> **Zero-shot is Grade-0-only** (98.3% recall on Grade 0, 0% on Grades 1–4). CLIP's text embeddings for disease severity are too close in its joint embedding space, so all images map to "No DR." Training the projection + ordinal head is required for meaningful multi-grade discrimination.
 
 ## Project Structure
 
