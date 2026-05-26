@@ -117,6 +117,8 @@ Both heads share the same learned projection features, so the interpretability o
 | F1 (weighted) | 0.6240 | TBD |
 | ECE (calibration) | 0.4764 | TBD |
 
+![Zero-Shot Confusion Matrix](assets/zero_shot_confusion_matrix.png)
+
 > **Zero-shot is Grade-0-only** (98.3% recall on Grade 0, 0% on Grades 1–4). CLIP's text embeddings for disease severity are too close in its joint embedding space, so all images map to "No DR." Training the projection + ordinal head is required for meaningful multi-grade discrimination.
 
 ## Project Structure
