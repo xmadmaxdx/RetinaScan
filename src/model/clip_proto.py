@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import open_clip
+from torchvision import transforms as T
 from .prototype_bank import TextPrototypeBank, SEVERITY_DESCRIPTIONS
 
 
@@ -50,8 +51,10 @@ class CLIPZeroShotNetwork(nn.Module):
             nn.Linear(self.visual_dim, self.visual_dim),
             nn.LayerNorm(self.visual_dim),
             nn.ReLU(inplace=True),
+            nn.Dropout(p=0.2),
             nn.Linear(self.visual_dim, self.prototype_dim),
             nn.LayerNorm(self.prototype_dim),
+            nn.Dropout(p=0.2),
         ).to(self.device)
 
         descriptions = mc.get("severities", SEVERITY_DESCRIPTIONS)
@@ -117,6 +120,43 @@ class CLIPZeroShotNetwork(nn.Module):
         probs = torch.softmax(proto_logits, dim=-1)
         grades = proto_logits.argmax(dim=-1)
         return grades, probs
+
+    def predict_with_uncertainty(self, images_pil, n_runs=20):
+        self.train()
+        device = self.device
+        tta = T.Compose([
+            T.RandomHorizontalFlip(p=0.5),
+            T.RandomAffine(degrees=5, translate=(0.05, 0.05)),
+            T.ColorJitter(brightness=0.1, contrast=0.1),
+            T.ToTensor(),
+            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+        all_grades, all_probs = [], []
+        for _ in range(n_runs):
+            batch = torch.stack([tta(img) for img in images_pil]).to(device)
+            with torch.no_grad():
+                raw = self.clip_model.encode_image(batch).float()
+                proj = F.normalize(self.projection(raw), dim=-1)
+                if self.use_ordinal and not self.zero_shot_only:
+                    ordinal_logits = self.ordinal_head(proj)
+                    ordinal_probs = torch.sigmoid(ordinal_logits)
+                    grades = (ordinal_probs > 0.0).sum(dim=-1)
+                else:
+                    proto_logits, _ = self.prototypes(proj, self.projection)
+                    grades = proto_logits.argmax(dim=-1)
+                proto_logits, _ = self.prototypes(proj, self.projection)
+                probs = torch.softmax(proto_logits, dim=-1)
+            all_grades.append(grades)
+            all_probs.append(probs)
+        self.eval()
+        stacked_probs = torch.stack(all_probs, dim=0)
+        stacked_grades = torch.stack(all_grades, dim=0)
+        mean_probs = stacked_probs.mean(dim=0)
+        mean_grade = stacked_grades.float().mean(dim=0)
+        entropy = -(mean_probs * torch.log(mean_probs + 1e-8)).sum(dim=-1)
+        max_entropy = torch.log(torch.tensor(5.0, device=device))
+        confidence = 1.0 - (entropy / max_entropy)
+        return mean_grade, confidence, mean_probs
 
     def get_text_prototypes(self):
         return self.prototypes.get_prototypes(projection=self.projection)

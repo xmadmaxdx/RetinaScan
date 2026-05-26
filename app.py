@@ -43,6 +43,10 @@ transform = transforms.Compose([
 ])
 
 
+SEVERITY_COLORS = ["green", "yellow", "orange", "red", "darkred"]
+N_RUNS = 20
+
+
 def predict(image):
     img_pil = Image.fromarray(image).convert("RGB")
     img_tensor = transform(img_pil).unsqueeze(0).to(device)
@@ -53,13 +57,36 @@ def predict(image):
     grade = grade.item()
     probs = probs[0].tolist()
 
-    result = {SEVERITY_LABELS[i]: round(p, 4) for i, p in enumerate(probs)}
-    result["Predicted Grade"] = int(grade)
-    result["Severity"] = SEVERITY_LABELS[grade]
+    mean_grade, confidence, mean_probs = model.predict_with_uncertainty([img_pil], n_runs=N_RUNS)
+    confidence = confidence[0].item()
 
-    proto_descriptions = model.get_prototype_descriptions()
-    matched_description = proto_descriptions[grade]
-    result["Prototype Match"] = matched_description
+    severity_label = SEVERITY_LABELS[int(round(mean_grade.item()))]
+    html_color = "green" if confidence > 0.7 else "orange" if confidence > 0.4 else "red"
+    confidence_text = f"<span style='color:{html_color}; font-weight:bold'>{confidence:.0%}</span>"
+    grade_color = SEVERITY_COLORS[int(round(mean_grade.item()))]
+
+    matched_desc = model.get_prototype_descriptions()[int(round(mean_grade.item()))]
+
+    uncertainty_breakdown = ""
+    if confidence < 0.7:
+        second_best = mean_probs[0].argsort(descending=True)
+        alt_grades = [SEVERITY_LABELS[int(g)] for g in second_best[1:3] if mean_probs[0][int(g)] > 0.1]
+        if alt_grades:
+            uncertainty_breakdown = f"Also possible: {', '.join(alt_grades)}"
+
+    result = (
+        f"## <span style='color:{grade_color}'>{severity_label}</span>\n\n"
+        f"**Confidence**: {confidence_text}\n\n"
+        f"**Prototype Match**: {matched_desc}\n\n"
+        f"{'⚠️ ' + uncertainty_breakdown if uncertainty_breakdown else ''}\n\n"
+        "### Per-Grade Similarity\n"
+    )
+    for i, (label, p) in enumerate(zip(SEVERITY_LABELS, mean_probs[0].tolist())):
+        pct = max(p * 100, 0.5)
+        sub = label.split(" — ")[1] if " — " in label else label
+        result += f"**{sub}**: {p*100:.1f}%\n"
+        result += f"<div style='background:#e0e0e0; border-radius:4px; height:16px; width:100%'>"
+        result += f"<div style='background:{SEVERITY_COLORS[i]}; width:{pct:.0f}%; height:16px; border-radius:4px'></div></div>\n"
 
     return result
 
@@ -71,12 +98,14 @@ description_text = "\n".join(
 demo = gr.Interface(
     fn=predict,
     inputs=gr.Image(type="numpy", label="Retina Fundus Image"),
-    outputs=gr.JSON(label="Prediction Results"),
+    outputs=gr.Markdown(label="Prediction Results"),
     title="RetinaScan — Zero-Shot DR Grading via CLIP Text Prototypes",
     description=(
         "Upload a retina fundus image. The model compares your image "
-        "against **CLIP text embeddings** of clinical severity descriptions — "
-        "no training labels required.\n\n"
+        "against **CLIP text embeddings** of clinical severity descriptions.\n\n"
+        "Uncertainty is estimated via **test-time augmentation** (20 runs): "
+        "if confidence is low, alternative grades are shown — indicating the "
+        "model needs a clearer image or is near a decision boundary.\n\n"
         f"### Prototype Descriptions\n{description_text}"
     ),
     examples=[["data/raw/sample.jpeg"]] if os.path.exists("data/raw/sample.jpeg") else None,

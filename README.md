@@ -54,7 +54,24 @@ Instead of learning prototypes from labeled images, we encode **clinically accur
 | 3 | "severe NPDR with venous beading, intraretinal hemorrhages in four quadrants..." |
 | 4 | "proliferative DR with neovascularization, vitreous hemorrhage..." |
 
-Cosine similarity against these prototypes produces interpretable confidence scores per grade — the model can explain *why* it chose a grade by showing which clinical description matched best.
+Cosine similarity against these prototypes produces interpretable confidence scores per grade — the model can explain *why* it chose a grade by showing which clinical description matched best. When uncertainty is high, it shows *which other grades* are plausible.
+
+### Uncertainty Quantification (Clinical Trust)
+
+A model that gives a wrong grade confidently is dangerous. RetinaScan estimates **per-image uncertainty** at inference using **test-time augmentation (TTA)**:
+
+1. Run the input through **20 random augmentations** (flip, slight rotation, color jitter)
+2. Aggregate predictions → mean grade + confidence score
+3. **Confidence** = `1 - normalized predictive entropy` (0–1 scale)
+
+**Clinical value**:
+- **High confidence (≥0.7)**: grade is stable across augmentations — trust it
+- **Medium confidence (0.4–0.7)**: near a decision boundary — flag for review
+- **Low confidence (<0.4)**: model is uncertain — suggest retake or escalate
+
+The app shows alternative plausible grades when confidence is low, so clinicians know *which other grades are possible*, not just that the model is unsure.
+
+Additionally, the projection head includes **dropout layers** for **MC Dropout** support — after retraining with dropout, uncertainty estimates further improve.
 
 ### Ordinal Regression Head (Clinical Accuracy)
 
@@ -87,6 +104,7 @@ Both heads share the same learned projection features, so the interpretability o
 | Accuracy | TBD | TBD |
 | Quadratic Kappa | TBD | TBD |
 | F1 (weighted) | TBD | TBD |
+| Uncertainty Calibration | — | Outputs confidence per prediction |
 
 ## Project Structure
 
