@@ -20,6 +20,7 @@ model:
   num_prototypes: 5
   use_text_prototypes: true
   zero_shot_only: false
+  use_ordinal: true
   severities:
     - "no diabetic retinopathy, healthy retina with normal blood vessels, optic disc, and macula"
     - "mild nonproliferative diabetic retinopathy with only a few microaneurysms, no hemorrhages or exudates"
@@ -50,6 +51,7 @@ loss:
   entropy_weight: 0.5
   diversity_weight: 0.2
   supervised_weight: 1.0
+  ordinal_weight: 0.5
 
 paths:
   checkpoint_dir: "checkpoints"

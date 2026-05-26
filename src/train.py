@@ -115,16 +115,16 @@ def patient_level_split(dataset, train_ratio=0.8, val_ratio=0.1):
 def train_epoch(model, loader, optimizer, criterion, device, scaler=None):
     model.train()
     total_loss = 0
-    metrics = {"sup_loss": 0, "align_loss": 0, "entropy_loss": 0, "diversity_loss": 0}
+    metrics = {"sup_loss": 0, "align_loss": 0, "entropy_loss": 0, "diversity_loss": 0, "ordinal_loss": 0}
     pbar = tqdm(loader, desc="Train")
     for images, labels in pbar:
         images, labels = images.to(device), labels.to(device)
         optimizer.zero_grad()
 
         with torch.amp.autocast("cuda", enabled=(scaler is not None)):
-            logits, projected = model(images)
+            logits, projected, ordinal_logits = model(images)
             text_protos = model.get_text_prototypes()
-            losses = criterion(logits, projected, text_protos, labels=labels)
+            losses = criterion(logits, projected, text_protos, labels=labels, ordinal_logits=ordinal_logits)
 
         if scaler:
             scaler.scale(losses["loss"]).backward()
@@ -220,7 +220,7 @@ def save_checkpoint(path, model, optimizer, scheduler, epoch, best_acc, drive_pa
 
 def load_checkpoint(path, model, optimizer, scheduler, device):
     ckpt = torch.load(path, map_location=device, weights_only=True)
-    model.load_state_dict(ckpt["model_state_dict"])
+    model.load_state_dict(ckpt["model_state_dict"], strict=False)
     optimizer.load_state_dict(ckpt["optimizer_state_dict"])
     scheduler.load_state_dict(ckpt["scheduler_state_dict"])
     return ckpt["epoch"], ckpt["best_acc"]
@@ -263,6 +263,7 @@ def main(config, drive_path=None, resume=False):
         entropy_weight=config["loss"]["entropy_weight"],
         diversity_weight=config["loss"]["diversity_weight"],
         supervised_weight=config["loss"]["supervised_weight"],
+        ordinal_weight=config["loss"].get("ordinal_weight", 0.5),
     )
 
     ckpt_dir = config["paths"]["checkpoint_dir"]
@@ -293,7 +294,7 @@ def main(config, drive_path=None, resume=False):
         scheduler.step()
         lr = optimizer.param_groups[0]["lr"]
         print(f"Loss: {train_loss:.4f} | Acc: {val_acc:.4f} | LR: {lr:.2e}")
-        print(f"  sup={train_metrics['sup_loss']:.4f} align={train_metrics['align_loss']:.4f} ent={train_metrics['entropy_loss']:.4f} div={train_metrics['diversity_loss']:.4f}")
+        print(f"  sup={train_metrics['sup_loss']:.4f} align={train_metrics['align_loss']:.4f} ent={train_metrics['entropy_loss']:.4f} div={train_metrics['diversity_loss']:.4f} ord={train_metrics['ordinal_loss']:.4f}")
 
         save_checkpoint(latest_path, model, optimizer, scheduler, epoch, best_acc, drive_path)
 

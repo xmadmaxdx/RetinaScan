@@ -30,7 +30,7 @@ class GradCAM:
         module.register_full_backward_hook(backward_hook)
 
     def generate(self, image_tensor, class_idx=None):
-        logits, _ = self.model.forward_gradcam(image_tensor)
+        logits, _, _ = self.model.forward_gradcam(image_tensor)
         if class_idx is None:
             class_idx = logits.argmax(dim=-1).item()
 

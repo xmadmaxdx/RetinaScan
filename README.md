@@ -13,7 +13,7 @@ Grades retinopathy severity (Grade 0–4) **without requiring labeled retina dat
 
 A mobile-deployable model that outputs Grade 0-4 severity with heatmaps, allowing non-specialists to screen patients in **under 2 seconds per image**.
 
-## Architecture — True Zero-Shot
+## Architecture
 
 ```
 CLIP Text Encoder (frozen)           CLIP Image Encoder (frozen)
@@ -22,24 +22,29 @@ CLIP Text Encoder (frozen)           CLIP Image Encoder (frozen)
   Severity Descriptions ──► text     retina fundus ──► image
   (Grade 0-4 clinical        features     image        features
    language)                    │                        │
-                                ▼                        ▼
-                     ┌────────────────────┐
-                     │  Shared Projection │  ← only trainable part
-                     │  (aligns both      │
-                     │   spaces to 512d)  │
-                     └────────┬───────────┘
-                              │
-                              ▼
-                    Cosine Similarity
-                    + Temperature Scaling
-                              │
-                              ▼
-                       Grade 0–4 + Heatmap
+                                 ▼                        ▼
+                      ┌──────────────────────────────────┐
+                      │     Shared Projection Head       │
+                      │     (only trainable part)        │
+                      └────────────┬─────────────────────┘
+                                   │
+                    ┌──────────────┴──────────────┐
+                    ▼                              ▼
+           Cosine Similarity               Ordinal Regression
+           + Temperature Scaling           (CORAL head, 4 tasks)
+                    │                              │
+                    ▼                              ▼
+           Interpretable Similarities       Clinically-grounded
+           to each severity text            Grade 0-4 prediction
+                    │                              │
+                    └──────────┬───────────────────┘
+                               ▼
+                    Final Grade + Grad-CAM Heatmap
 ```
 
-### Key Innovation: Text-Derived Prototypes
+### Text-Derived Prototypes (Interpretability)
 
-Instead of learning prototypes from labeled images (traditional approach), we encode **clinically accurate severity descriptions** through CLIP's text encoder:
+Instead of learning prototypes from labeled images, we encode **clinically accurate severity descriptions** through CLIP's text encoder. These text embeddings serve as fixed, interpretable anchors:
 
 | Grade | Text Prototype |
 |-------|----------------|
@@ -49,14 +54,31 @@ Instead of learning prototypes from labeled images (traditional approach), we en
 | 3 | "severe NPDR with venous beading, intraretinal hemorrhages in four quadrants..." |
 | 4 | "proliferative DR with neovascularization, vitreous hemorrhage..." |
 
-These text embeddings serve as **fixed, interpretable prototypes** — the model compares image features against them via cosine similarity. **No labeled retina images required.**
+Cosine similarity against these prototypes produces interpretable confidence scores per grade — the model can explain *why* it chose a grade by showing which clinical description matched best.
+
+### Ordinal Regression Head (Clinical Accuracy)
+
+Diabetic retinopathy grading is inherently **ordinal** — misclassifying Grade 3 as Grade 4 is clinically acceptable, but Grade 0 as Grade 4 is dangerous. Standard cross-entropy treats all errors equally, which is wrong for this task.
+
+A **CORAL (COnsistent RAnk Logits)** head solves this by decomposing the problem into 4 binary tasks:
+- Is severity ≥ Grade 1?
+- Is severity ≥ Grade 2?
+- Is severity ≥ Grade 3?
+- Is severity ≥ Grade 4?
+
+The final grade is the sum of positive tasks. This:
+- Penalizes distant errors more than near errors (matches clinical reality)
+- Improves **Quadratic Weighted Kappa** — the gold standard metric for DR grading
+- Produces calibrated confidence scores per decision threshold
+
+Both heads share the same learned projection features, so the interpretability of prototypes is preserved while the ordinal head drives the final prediction.
 
 ### Two Operating Modes
 
-| Mode | Training Data | Accuracy | Use Case |
-|------|--------------|----------|----------|
-| **Pure Zero-Shot** | None — just CLIP | Baseline | Instant deploy, no training |
-| **Projection Tuning** | Unlabeled or labeled retina | Higher | After collecting some data |
+| Mode | Training Data | Use Case |
+|------|--------------|----------|
+| **Pure Zero-Shot** | None — just CLIP | Instant deploy, no training |
+| **Projection Tuning** | Labeled retina | Higher accuracy, trained ordinal head |
 
 ## Results
 

@@ -5,6 +5,24 @@ import open_clip
 from .prototype_bank import TextPrototypeBank, SEVERITY_DESCRIPTIONS
 
 
+class CoralOrdinalHead(nn.Module):
+    def __init__(self, input_dim, num_tasks=4):
+        super().__init__()
+        self.num_tasks = num_tasks
+        self.linear = nn.Linear(input_dim, 1)
+        self.biases = nn.Parameter(torch.zeros(num_tasks))
+
+    def forward(self, x):
+        shared = self.linear(x)
+        return shared + self.biases
+
+    def predict(self, x, threshold=0.0):
+        logits = self.forward(x)
+        probs = torch.sigmoid(logits)
+        grades = (probs > threshold).sum(dim=-1)
+        return grades, probs
+
+
 class CLIPZeroShotNetwork(nn.Module):
     def __init__(self, config, device=None):
         super().__init__()
@@ -26,6 +44,7 @@ class CLIPZeroShotNetwork(nn.Module):
         self.prototype_dim = mc["prototype_dim"]
         self.temperature = mc["temperature"]
         self.zero_shot_only = mc.get("zero_shot_only", False)
+        self.use_ordinal = mc.get("use_ordinal", True)
 
         self.projection = nn.Sequential(
             nn.Linear(self.visual_dim, self.visual_dim),
@@ -43,6 +62,11 @@ class CLIPZeroShotNetwork(nn.Module):
             descriptions=descriptions,
         ).to(self.device)
 
+        if not self.zero_shot_only:
+            self.ordinal_head = CoralOrdinalHead(
+                input_dim=self.prototype_dim, num_tasks=4
+            ).to(self.device)
+
         if self.zero_shot_only:
             for p in self.projection.parameters():
                 p.requires_grad = False
@@ -51,14 +75,20 @@ class CLIPZeroShotNetwork(nn.Module):
         with torch.no_grad():
             raw_features = self.clip_model.encode_image(images).float()
         projected = F.normalize(self.projection(raw_features), dim=-1)
-        logits, text_protos = self.prototypes(projected, self.projection)
-        return logits, projected
+        proto_logits, text_protos = self.prototypes(projected, self.projection)
+        ordinal_logits = None
+        if not self.zero_shot_only and self.use_ordinal:
+            ordinal_logits = self.ordinal_head(projected)
+        return proto_logits, projected, ordinal_logits
 
     def forward_gradcam(self, images):
         raw_features = self.clip_model.encode_image(images).float()
         projected = F.normalize(self.projection(raw_features), dim=-1)
-        logits, text_protos = self.prototypes(projected, self.projection)
-        return logits, projected
+        proto_logits, text_protos = self.prototypes(projected, self.projection)
+        ordinal_logits = None
+        if not self.zero_shot_only and self.use_ordinal:
+            ordinal_logits = self.ordinal_head(projected)
+        return proto_logits, projected, ordinal_logits
 
     @torch.no_grad()
     def zero_shot_predict(self, images):
@@ -79,9 +109,13 @@ class CLIPZeroShotNetwork(nn.Module):
         self.eval()
         if self.zero_shot_only:
             return self.zero_shot_predict(images)
-        logits, projected = self.forward(images)
-        probs = torch.softmax(logits, dim=-1)
-        grades = logits.argmax(dim=-1)
+        proto_logits, projected, ordinal_logits = self.forward(images)
+        if self.use_ordinal and ordinal_logits is not None:
+            grades, _ = self.ordinal_head.predict(projected)
+            probs = torch.softmax(proto_logits, dim=-1)
+            return grades, probs
+        probs = torch.softmax(proto_logits, dim=-1)
+        grades = proto_logits.argmax(dim=-1)
         return grades, probs
 
     def get_text_prototypes(self):

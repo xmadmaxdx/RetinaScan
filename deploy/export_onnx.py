@@ -27,7 +27,7 @@ def export_to_onnx(config, checkpoint_path=None, output_path="deploy/model.onnx"
     model.config["model"]["zero_shot_only"] = True
 
     with torch.no_grad():
-        logits, features = model(dummy)
+        logits, features, _ = model(dummy)
 
     torch.onnx.export(
         model,
