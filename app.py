@@ -40,9 +40,6 @@ else:
     zs_config = deepcopy(CONFIG)
     zs_config["model"]["zero_shot_only"] = True
     model = CLIPZeroShotNetwork(zs_config, device=device)
-    zs_config = deepcopy(CONFIG)
-    zs_config["model"]["zero_shot_only"] = True
-    model = CLIPZeroShotNetwork(zs_config, device=device)
 
 model.eval()
 

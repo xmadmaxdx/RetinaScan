@@ -26,12 +26,14 @@ class TextPrototypeLoss(nn.Module):
 
     def forward(self, proto_logits, projected_features, text_prototypes,
                 labels=None, ordinal_logits=None):
-        probs = F.softmax(proto_logits / self.temperature, dim=-1)
-        log_probs = F.log_softmax(proto_logits / self.temperature, dim=-1)
+        # NOTE: proto_logits are already scaled by 1/temperature in prototype_bank.forward()
+        # Do NOT divide by temperature again here — that was Bug 13 (double scaling ÷0.07²)
+        probs = F.softmax(proto_logits, dim=-1)
+        log_probs = F.log_softmax(proto_logits, dim=-1)
 
         sup_loss = torch.tensor(0.0, device=proto_logits.device)
         if labels is not None:
-            sup_loss = F.cross_entropy(proto_logits / self.temperature, labels)
+            sup_loss = F.cross_entropy(proto_logits, labels)
 
         align_targets = labels if labels is not None else probs.argmax(dim=-1)
         selected = F.one_hot(align_targets, num_classes=text_prototypes.size(0)).float()

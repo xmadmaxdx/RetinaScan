@@ -96,9 +96,10 @@ def get_val_transform(config):
     ])
 
 
-def patient_level_split(dataset, train_ratio=0.8, val_ratio=0.1):
+def patient_level_split(dataset, train_ratio=0.8, val_ratio=0.1, seed=42):
     patients = sorted(set(dataset.patient_ids))
-    np.random.shuffle(patients)
+    rng = np.random.RandomState(seed)
+    rng.shuffle(patients)
     n = len(patients)
     train_end = int(n * train_ratio)
     val_end = train_end + int(n * val_ratio)
@@ -112,7 +113,7 @@ def patient_level_split(dataset, train_ratio=0.8, val_ratio=0.1):
     return train_idx, val_idx, test_idx
 
 
-def train_epoch(model, loader, optimizer, criterion, device, scaler=None):
+def train_epoch(model, loader, optimizer, criterion, device, scaler=None, grad_clip=1.0):
     model.train()
     total_loss = 0
     metrics = {"sup_loss": 0, "align_loss": 0, "entropy_loss": 0, "diversity_loss": 0, "ordinal_loss": 0}
@@ -128,10 +129,13 @@ def train_epoch(model, loader, optimizer, criterion, device, scaler=None):
 
         if scaler:
             scaler.scale(losses["loss"]).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
             scaler.step(optimizer)
             scaler.update()
         else:
             losses["loss"].backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
             optimizer.step()
 
         total_loss += losses["loss"].item()
@@ -164,7 +168,8 @@ def build_dataset(config, transform, split="train"):
             hf_dataset_name=hf_name, split=hf_split, transform=transform
         )
         n = len(dataset)
-        indices = np.random.permutation(n).tolist()
+        rng = np.random.RandomState(42)
+        indices = rng.permutation(n).tolist()
         train_end = int(n * config["data"]["train_ratio"])
         val_end = train_end + int(n * config["data"]["val_ratio"])
         if split == "train":
@@ -188,7 +193,8 @@ def build_dataset(config, transform, split="train"):
         else:
             full_dataset = EyePACSDataset(csv_path, image_dir, transform=transform)
             n = len(full_dataset)
-            indices = np.random.permutation(n).tolist()
+            rng = np.random.RandomState(42)
+            indices = rng.permutation(n).tolist()
             train_end = int(n * config["data"]["train_ratio"])
             val_end = train_end + int(n * config["data"]["val_ratio"])
             if split == "train":
@@ -257,7 +263,19 @@ def main(config, drive_path=None, resume=False):
     )
 
     total_epochs = config["training"]["epochs"]
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_epochs)
+    warmup_epochs = config["training"].get("warmup_epochs", 0)
+    if warmup_epochs > 0:
+        warmup_sched = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=0.01, total_iters=warmup_epochs
+        )
+        cosine_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=max(total_epochs - warmup_epochs, 1)
+        )
+        scheduler = torch.optim.lr_scheduler.SequentialLR(
+            optimizer, schedulers=[warmup_sched, cosine_sched], milestones=[warmup_epochs]
+        )
+    else:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_epochs)
     criterion = TextPrototypeLoss(
         temperature=config["model"]["temperature"],
         entropy_weight=config["loss"]["entropy_weight"],
@@ -286,10 +304,11 @@ def main(config, drive_path=None, resume=False):
             print("No checkpoint found for resume — starting from scratch")
 
     scaler = torch.amp.GradScaler("cuda", enabled=(config["training"]["mixed_precision"] and torch.cuda.is_available()))
+    grad_clip = config["training"].get("gradient_clip", 1.0)
 
     for epoch in range(start_epoch, total_epochs):
         print(f"\nEpoch {epoch+1}/{total_epochs}")
-        train_loss, train_metrics = train_epoch(model, train_loader, optimizer, criterion, device, scaler)
+        train_loss, train_metrics = train_epoch(model, train_loader, optimizer, criterion, device, scaler, grad_clip=grad_clip)
         val_acc = validate(model, val_loader, device)
         scheduler.step()
         lr = optimizer.param_groups[0]["lr"]
