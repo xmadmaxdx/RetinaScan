@@ -216,7 +216,7 @@ def main(config):
         print(f"Zero-shot validation accuracy: {val_acc:.4f}")
         return
 
-    trainable_params = filter(lambda p: p.requires_grad, model.parameters())
+    trainable_params = list(filter(lambda p: p.requires_grad, model.parameters()))
     total_trainable = sum(p.numel() for p in trainable_params)
     print(f"Trainable parameters: {total_trainable:,} (projection head only)")
 
