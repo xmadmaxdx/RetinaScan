@@ -39,7 +39,7 @@ training:
   patient_level_split: true
 
 augmentation:
-  random_crop: 196
+  random_crop: 224
   color_jitter: 0.3
   gaussian_blur: 0.1
   horizontal_flip: true

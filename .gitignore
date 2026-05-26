@@ -1,0 +1,7 @@
+error.txt
+*.log
+__pycache__/
+*.pyc
+checkpoints/
+logs/
+.DS_Store
