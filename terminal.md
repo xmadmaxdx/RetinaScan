@@ -22,7 +22,7 @@ drive.mount('/content/drive')
 
 ### 3. Install core ML libraries
 ```bash
-!pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+!pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 !pip install open-clip-torch==2.24.0
 !pip install "numpy<2.0.0"  # wandb/timm compat with numpy 1.x
 ```
@@ -83,9 +83,14 @@ from google.colab import drive
 drive.mount('/content/drive')
 ```
 
-Train (~20-30 min for 10 epochs on T4):
+Train (~2.5h for 50 epochs on T4):
 ```bash
 !python src/train.py --config configs/train_config.yaml --drive-path /content/drive/MyDrive/RetinaScan/checkpoints
+```
+
+Calibrate confidence scores (post-hoc temperature scaling):
+```bash
+!python src/calibrate.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
 ```
 
 Evaluate trained model:

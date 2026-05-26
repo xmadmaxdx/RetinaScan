@@ -9,6 +9,10 @@ Grades retinopathy severity (Grade 0–4) **without requiring labeled retina dat
 
 > 80% of diabetic patients in low-income countries never receive retina screening due to specialist scarcity. Existing graders need thousands of labeled images per clinic.
 
+## Current Status
+
+**In active development.** The zero-shot baseline (72.6% accuracy, all-Grade-0) confirms CLIP alone can't separate DR severity. The projection head + CORAL ordinal head architecture is built and training, but we're still debugging the training loop to break past the majority-class ceiling. All design decisions (CORAL, pos-weighted BCE, temperature scaling, uncertainty quantification) are in place — the engineering work is converging.
+
 ## Impact
 
 A mobile-deployable model that outputs Grade 0-4 severity with heatmaps, allowing non-specialists to screen patients in **under 2 seconds per image**.
