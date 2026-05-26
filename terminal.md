@@ -82,8 +82,12 @@ from google.colab import drive
 drive.mount('/content/drive')
 
 # Train (projection head only, ~2-3h on T4)
-# --drive-path auto-syncs best checkpoints to Google Drive every epoch
+# --drive-path auto-syncs best + latest checkpoints to Google Drive every epoch
 !python src/train.py --config configs/train_config.yaml --drive-path /content/drive/MyDrive/RetinaScan/checkpoints
+
+# Resume after disconnect (copies Drive checkpoint back, then resumes)
+!cp /content/drive/MyDrive/RetinaScan/checkpoints/latest.pt checkpoints/latest.pt
+!python src/train.py --config configs/train_config.yaml --drive-path /content/drive/MyDrive/RetinaScan/checkpoints --resume
 
 # Evaluate trained model
 !python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt --drive-path /content/drive/MyDrive/RetinaScan/logs
@@ -93,6 +97,12 @@ drive.mount('/content/drive')
 
 # Export ONNX
 !python deploy/export_onnx.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
+```
+
+**Resume after crash:**
+```bash
+!cp /content/drive/MyDrive/RetinaScan/checkpoints/latest.pt checkpoints/latest.pt
+!python src/train.py --config configs/train_config.yaml --drive-path /content/drive/MyDrive/RetinaScan/checkpoints --resume
 ```
 
 ---
