@@ -160,7 +160,7 @@ python src/evaluate/gradcam.py --config configs/train_config.yaml --checkpoint c
 ```bibtex
 @misc{retinascan2026,
   title={RetinaScan: Zero-Shot Diabetic Retinopathy Grading via CLIP Text-Guided Visual Prototypes},
-  author={Your Name},
+  author={Simanta Das},
   year={2026}
 }
 ```
