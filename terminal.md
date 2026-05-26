@@ -24,6 +24,7 @@ drive.mount('/content/drive')
 ```bash
 !pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 !pip install open-clip-torch==2.24.0
+!pip install "numpy<2.0.0"  # wandb/timm compat with numpy 1.x
 ```
 
 ### 4. Install image processing
