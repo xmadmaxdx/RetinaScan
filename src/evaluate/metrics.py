@@ -14,24 +14,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 from src.model.clip_proto import CLIPZeroShotNetwork
-from src.train import EyePACSDataset, HuggingFaceEyePACSDataset, get_val_transform
+from src.train import build_dataset, get_val_transform
 from src.model.prototype_bank import SEVERITY_LABELS
 
 
 def get_eval_dataset(config):
-    source = config["data"].get("source", "local")
     transform = get_val_transform(config)
-    if source == "huggingface":
-        return HuggingFaceEyePACSDataset(
-            hf_dataset_name=config["data"]["hf_dataset"],
-            split=config["data"].get("hf_split", "train"),
-            transform=transform,
-        )
-    csv_path = config["data"]["labels_csv"]
-    image_dir = config["data"]["processed_path"]
-    if not os.path.exists(image_dir):
-        image_dir = config["data"]["raw_path"]
-    return EyePACSDataset(csv_path, image_dir, transform=transform)
+    return build_dataset(config, transform, split="val")
 
 
 def expected_calibration_error(labels, probs, n_bins=10):
