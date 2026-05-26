@@ -7,7 +7,9 @@ def coral_ordinal_loss(ordinal_logits, labels, num_tasks=4):
     targets = torch.zeros(len(labels), num_tasks, device=labels.device)
     for k in range(num_tasks):
         targets[:, k] = (labels > k).float()
-    return F.binary_cross_entropy_with_logits(ordinal_logits, targets)
+    pos_rate = targets.mean(dim=0)
+    pos_weight = ((1 - pos_rate) / (pos_rate + 1e-6)).clamp(1.0, 50.0)
+    return F.binary_cross_entropy_with_logits(ordinal_logits, targets, pos_weight=pos_weight)
 
 
 class TextPrototypeLoss(nn.Module):
