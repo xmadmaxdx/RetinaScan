@@ -1,0 +1,59 @@
+# RetinaScan Training Configuration
+
+data:
+  raw_path: "data/raw"
+  processed_path: "data/processed"
+  labels_csv: "data/trainLabels.csv"
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  image_size: 512
+
+model:
+  backbone: "ViT-B/16"
+  pretrained: "openai"
+  prototype_dim: 512
+  temperature: 0.07
+  num_prototypes: 5
+  use_text_prototypes: true
+  zero_shot_only: false
+  severities:
+    - "no diabetic retinopathy, healthy retina with normal blood vessels, optic disc, and macula"
+    - "mild nonproliferative diabetic retinopathy with only a few microaneurysms, no hemorrhages or exudates"
+    - "moderate nonproliferative diabetic retinopathy with microaneurysms, dot-blot hemorrhages, hard exudates, and cotton wool spots"
+    - "severe nonproliferative diabetic retinopathy with venous beading, intraretinal hemorrhages in four quadrants, and IRMA"
+    - "proliferative diabetic retinopathy with neovascularization, vitreous hemorrhage, and high-risk characteristics"
+
+training:
+  epochs: 50
+  batch_size: 32
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  lr_scheduler: "cosine"
+  warmup_epochs: 5
+  mixed_precision: true
+  gradient_clip: 1.0
+  patient_level_split: true
+
+augmentation:
+  random_crop: 448
+  color_jitter: 0.3
+  gaussian_blur: 0.1
+  horizontal_flip: true
+  vertical_flip: false
+
+loss:
+  proto_align_weight: 1.0
+  entropy_weight: 0.5
+  diversity_weight: 0.2
+  supervised_weight: 1.0
+
+paths:
+  checkpoint_dir: "checkpoints"
+  log_dir: "logs"
+  best_metric: "kappa"
+
+deploy:
+  onnx_export: true
+  opset_version: 17
+  target_fps: 0.5
