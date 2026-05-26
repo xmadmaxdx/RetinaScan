@@ -11,6 +11,24 @@ from src.model.clip_proto import CLIPZeroShotNetwork
 from src.losses.proto_loss import TextPrototypeLoss
 
 
+class HuggingFaceEyePACSDataset(Dataset):
+    def __init__(self, hf_dataset_name="bumbledeep/eyepacs", split="train", transform=None):
+        from datasets import load_dataset
+        self.ds = load_dataset(hf_dataset_name, split=split, streaming=False)
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.ds)
+
+    def __getitem__(self, idx):
+        row = self.ds[idx]
+        img = row["image"].convert("RGB")
+        label = row["label_code"]
+        if self.transform:
+            img = self.transform(img)
+        return img, label
+
+
 class EyePACSDataset(Dataset):
     def __init__(self, csv_path, image_dir, transform=None):
         self.image_dir = image_dir
@@ -135,36 +153,55 @@ def validate(model, loader, device):
     return correct / total
 
 
+def build_dataset(config, transform, split="train"):
+    source = config["data"].get("source", "local")
+    if source == "huggingface":
+        hf_name = config["data"]["hf_dataset"]
+        hf_split = config["data"].get("hf_split", "train")
+        dataset = HuggingFaceEyePACSDataset(
+            hf_dataset_name=hf_name, split=hf_split, transform=transform
+        )
+        n = len(dataset)
+        indices = np.random.permutation(n).tolist()
+        train_end = int(n * config["data"]["train_ratio"])
+        val_end = train_end + int(n * config["data"]["val_ratio"])
+        if split == "train":
+            return Subset(dataset, indices[:train_end])
+        elif split == "val":
+            return Subset(dataset, indices[train_end:val_end])
+        return Subset(dataset, indices[val_end:])
+    else:
+        csv_path = config["data"]["labels_csv"]
+        image_dir = config["data"]["processed_path"]
+        if not os.path.exists(image_dir):
+            image_dir = config["data"]["raw_path"]
+        if config["training"].get("patient_level_split", False):
+            full_dataset = EyePACSWithPatientID(csv_path, image_dir, transform=transform)
+            train_idx, val_idx, _ = patient_level_split(
+                full_dataset, config["data"]["train_ratio"], config["data"]["val_ratio"]
+            )
+            if split == "train":
+                return Subset(full_dataset, train_idx)
+            return Subset(full_dataset, val_idx)
+        else:
+            full_dataset = EyePACSDataset(csv_path, image_dir, transform=transform)
+            n = len(full_dataset)
+            indices = np.random.permutation(n).tolist()
+            train_end = int(n * config["data"]["train_ratio"])
+            val_end = train_end + int(n * config["data"]["val_ratio"])
+            if split == "train":
+                return Subset(full_dataset, indices[:train_end])
+            return Subset(full_dataset, indices[train_end:val_end])
+
+
 def main(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
+    print(f"Data source: {config['data'].get('source', 'local')}")
     mc = config["model"]
 
-    csv_path = config["data"]["labels_csv"]
-    image_dir = config["data"]["processed_path"]
-    if not os.path.exists(image_dir):
-        image_dir = config["data"]["raw_path"]
-
-    do_patient_split = config["training"].get("patient_level_split", False)
-    if do_patient_split:
-        full_dataset = EyePACSWithPatientID(csv_path, image_dir, transform=get_train_transform(config))
-        train_idx, val_idx, test_idx = patient_level_split(
-            full_dataset, config["data"]["train_ratio"], config["data"]["val_ratio"]
-        )
-        train_ds = Subset(full_dataset, train_idx)
-        val_dataset = EyePACSWithPatientID(csv_path, image_dir, transform=get_val_transform(config))
-        val_ds = Subset(val_dataset, val_idx)
-    else:
-        full_dataset = EyePACSDataset(csv_path, image_dir, transform=get_train_transform(config))
-        n = len(full_dataset)
-        train_len = int(n * config["data"]["train_ratio"])
-        val_len = int(n * config["data"]["val_ratio"])
-        indices = np.random.permutation(n).tolist()
-        train_idx = indices[:train_len]
-        val_idx = indices[train_len:train_len + val_len]
-        train_ds = Subset(full_dataset, train_idx)
-        val_dataset = EyePACSDataset(csv_path, image_dir, transform=get_val_transform(config))
-        val_ds = Subset(val_dataset, val_idx)
+    train_ds = build_dataset(config, get_train_transform(config), split="train")
+    val_ds = build_dataset(config, get_val_transform(config), split="val")
 
     train_loader = DataLoader(train_ds, batch_size=config["training"]["batch_size"], shuffle=True, num_workers=2)
     val_loader = DataLoader(val_ds, batch_size=config["training"]["batch_size"], shuffle=False, num_workers=2)

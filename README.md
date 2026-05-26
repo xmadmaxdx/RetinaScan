@@ -97,6 +97,15 @@ RetinaScan/
 └── README.md
 ```
 
+## Dataset
+
+Two data sources supported (set `data.source` in config):
+
+| Source | Size | Auth | Preprocessing |
+|--------|------|------|---------------|
+| `huggingface` (default) | 6.5GB — `bumbledeep/eyepacs` | None | Already cropped + resized |
+| `local` | 88GB — EyePACS Kaggle | Kaggle API token | Run `src/preprocess.py` |
+
 ## Quick Start
 
 ### Pure Zero-Shot (2 minutes, no GPU needed for inference)
@@ -107,7 +116,7 @@ python src/evaluate/metrics.py --config configs/train_config.yaml
 
 ### With Projection Tuning (Colab T4, ~2-3h)
 ```bash
-python src/preprocess.py --config configs/train_config.yaml
+# Dataset loads automatically from HuggingFace — no download step needed
 python src/train.py --config configs/train_config.yaml
 python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
 ```

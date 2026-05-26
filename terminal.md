@@ -33,26 +33,12 @@ drive.mount('/content/drive')
 !pip install Pillow==10.3.0
 ```
 
-### 5. Install Kaggle CLI & download EyePACS
-
-**Method A — Token auth (new, recommended):**
+### 5. Download EyePACS (HuggingFace — no Kaggle auth needed)
 ```python
-# Paste your token here
-import os
-os.environ["KAGGLE_API_TOKEN"] = "KGAT_your_token_here"
-!pip install kaggle>=2.0.0
-!kaggle competitions download -c diabetic-retinopathy-detection -p data/raw/
-!unzip -q "data/raw/diabetic-retinopathy-detection.zip" -d data/raw/
-```
-
-**Method B — File auth (legacy):**
-```bash
-!pip install kaggle==1.6.14
-!mkdir -p ~/.kaggle
-!cp /content/drive/MyDrive/kaggle.json ~/.kaggle/
-!chmod 600 ~/.kaggle/kaggle.json
-!kaggle competitions download -c diabetic-retinopathy-detection -p data/raw/
-!unzip -q "data/raw/diabetic-retinopathy-detection.zip" -d data/raw/
+!pip install datasets -q
+from datasets import load_dataset
+ds = load_dataset("bumbledeep/eyepacs", split="train")
+print(f"Loaded {len(ds)} images — already cropped and resized")
 ```
 
 ### 6. Install training & evaluation utilities
@@ -82,18 +68,14 @@ os.environ["KAGGLE_API_TOKEN"] = "KGAT_your_token_here"
 
 ### Option A: Pure Zero-Shot (no training needed)
 ```bash
-# Preprocess images
-!python src/preprocess.py --config configs/train_config.yaml
-
-# Evaluate zero-shot — CLIP text vs image similarity, no training
+# Dataset already loaded via HuggingFace — skip preprocessing
+# Evaluate zero-shot — CLIP text vs image similarity
 !python src/evaluate/metrics.py --config configs/train_config.yaml
 ```
 
 ### Option B: Train Projection Head (better accuracy)
 ```bash
-# Preprocess
-!python src/preprocess.py --config configs/train_config.yaml
-
+# Dataset already loaded — skip preprocessing
 # Train (projection head only, ~2-3h on T4)
 !python src/train.py --config configs/train_config.yaml
 

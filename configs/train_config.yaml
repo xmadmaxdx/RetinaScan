@@ -1,6 +1,9 @@
 # RetinaScan Training Configuration
 
 data:
+  source: "huggingface"           # "huggingface" or "local" (CSB + image dir)
+  hf_dataset: "bumbledeep/eyepacs"
+  hf_split: "train"
   raw_path: "data/raw"
   processed_path: "data/processed"
   labels_csv: "data/trainLabels.csv"
