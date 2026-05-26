@@ -16,7 +16,7 @@ drive.mount('/content/drive')
 
 ### 2. Clone the repo
 ```bash
-!git clone https://github.com/YOUR_USER/RetinaScan.git
+!git clone https://github.com/xmadmaxdx/RetinaScan.git
 %cd RetinaScan
 ```
 
