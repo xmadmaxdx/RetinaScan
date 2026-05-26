@@ -29,8 +29,8 @@ class TextPrototypeLoss(nn.Module):
         if labels is not None:
             sup_loss = F.cross_entropy(proto_logits / self.temperature, labels)
 
-        assigned = probs.argmax(dim=-1)
-        selected = F.one_hot(assigned, num_classes=text_prototypes.size(0)).float()
+        align_targets = labels if labels is not None else probs.argmax(dim=-1)
+        selected = F.one_hot(align_targets, num_classes=text_prototypes.size(0)).float()
         proto_selected = selected @ text_prototypes
         proto_selected = F.normalize(proto_selected, dim=-1)
         proj_norm = F.normalize(projected_features, dim=-1)

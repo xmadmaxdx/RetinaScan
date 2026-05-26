@@ -48,10 +48,10 @@ augmentation:
 
 loss:
   proto_align_weight: 1.0
-  entropy_weight: 0.5
-  diversity_weight: 0.2
+  entropy_weight: 0.05
+  diversity_weight: 0.02
   supervised_weight: 1.0
-  ordinal_weight: 0.5
+  ordinal_weight: 1.0
 
 paths:
   checkpoint_dir: "checkpoints"
