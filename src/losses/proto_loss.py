@@ -3,13 +3,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+TASK_POS_WEIGHTS = [2.7, 4.0, 19.0, 49.0]
+
+
 def coral_ordinal_loss(ordinal_logits, labels, num_tasks=4):
     targets = torch.zeros(len(labels), num_tasks, device=labels.device)
     for k in range(num_tasks):
         targets[:, k] = (labels > k).float()
-    pos_rate = targets.mean(dim=0)
-    pos_weight = ((1 - pos_rate) / (pos_rate + 1e-6)).clamp(1.0, 50.0)
-    return F.binary_cross_entropy_with_logits(ordinal_logits, targets, pos_weight=pos_weight)
+    pw = torch.tensor(TASK_POS_WEIGHTS[:num_tasks], device=ordinal_logits.device)
+    return F.binary_cross_entropy_with_logits(ordinal_logits, targets, pos_weight=pw)
 
 
 class TextPrototypeLoss(nn.Module):
