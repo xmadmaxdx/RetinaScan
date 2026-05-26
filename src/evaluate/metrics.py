@@ -34,8 +34,15 @@ def get_eval_dataset(config):
     return EyePACSDataset(csv_path, image_dir, transform=transform)
 
 
+def sync_to_drive(src_path, drive_dir):
+    if not os.path.exists(drive_dir):
+        os.makedirs(drive_dir, exist_ok=True)
+    import shutil
+    shutil.copy2(src_path, os.path.join(drive_dir, os.path.basename(src_path)))
+
+
 @torch.no_grad()
-def evaluate(config, checkpoint_path=None):
+def evaluate(config, checkpoint_path=None, drive_path=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = CLIPZeroShotNetwork(config, device=device)
@@ -81,10 +88,18 @@ def evaluate(config, checkpoint_path=None):
     plt.xlabel("Predicted")
     plt.ylabel("True")
     plt.title("Confusion Matrix - DR Grades (0-4)")
-    os.makedirs(config["paths"]["log_dir"], exist_ok=True)
-    plt.savefig(os.path.join(config["paths"]["log_dir"], "confusion_matrix.png"),
-                dpi=150, bbox_inches="tight")
+    log_dir = config["paths"]["log_dir"]
+    os.makedirs(log_dir, exist_ok=True)
+    cm_path = os.path.join(log_dir, "confusion_matrix.png")
+    plt.savefig(cm_path, dpi=150, bbox_inches="tight")
     plt.close()
+
+    if drive_path:
+        os.makedirs(drive_path, exist_ok=True)
+        sync_to_drive(cm_path, drive_path)
+        if checkpoint_path and os.path.exists(checkpoint_path):
+            sync_to_drive(checkpoint_path, drive_path)
+        print(f"Synced to Drive: {drive_path}")
     print("Confusion matrix saved to logs/")
 
     return {"accuracy": acc, "kappa": kappa, "f1_macro": f1_macro, "f1_weighted": f1_weighted}
@@ -94,7 +109,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/train_config.yaml")
     parser.add_argument("--checkpoint", default=None)
+    parser.add_argument("--drive-path", default=None, help="Sync results to Google Drive path")
     args = parser.parse_args()
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
-    evaluate(cfg, args.checkpoint)
+    evaluate(cfg, args.checkpoint, drive_path=args.drive_path)

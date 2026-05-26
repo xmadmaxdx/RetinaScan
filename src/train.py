@@ -196,7 +196,15 @@ def build_dataset(config, transform, split="train"):
             return Subset(full_dataset, indices[train_end:val_end])
 
 
-def main(config):
+def sync_to_drive(src_path, drive_dir):
+    if not os.path.exists(drive_dir):
+        os.makedirs(drive_dir, exist_ok=True)
+    import shutil
+    shutil.copy2(src_path, os.path.join(drive_dir, os.path.basename(src_path)))
+    print(f"Synced to Drive: {drive_dir}")
+
+
+def main(config, drive_path=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     print(f"Data source: {config['data'].get('source', 'local')}")
@@ -235,6 +243,8 @@ def main(config):
     )
 
     os.makedirs(config["paths"]["checkpoint_dir"], exist_ok=True)
+    if drive_path:
+        os.makedirs(drive_path, exist_ok=True)
     best_acc = 0.0
     scaler = torch.amp.GradScaler("cuda", enabled=(config["training"]["mixed_precision"] and torch.cuda.is_available()))
 
@@ -258,6 +268,16 @@ def main(config):
                 "text_descriptions": model.get_prototype_descriptions(),
             }, ckpt_path)
             print(f"Checkpoint saved -> {ckpt_path}")
+            if drive_path:
+                sync_to_drive(ckpt_path, drive_path)
+
+    if drive_path:
+        log_dir = config["paths"]["log_dir"]
+        if os.path.exists(log_dir):
+            import shutil
+            for f in os.listdir(log_dir):
+                shutil.copy2(os.path.join(log_dir, f), os.path.join(drive_path, f))
+            print(f"Logs synced to Drive: {drive_path}")
 
     print(f"Done. Best val acc: {best_acc:.4f}")
 
@@ -266,9 +286,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/train_config.yaml")
     parser.add_argument("--zero-shot", action="store_true", help="Run pure zero-shot, no training")
+    parser.add_argument("--drive-path", default=None, help="Sync checkpoints to Google Drive path")
     args = parser.parse_args()
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
     if args.zero_shot:
         cfg["model"]["zero_shot_only"] = True
-    main(cfg)
+    main(cfg, drive_path=args.drive_path)

@@ -77,12 +77,16 @@ print(f"Loaded {len(ds)} images — already cropped and resized")
 
 ### Option B: Train Projection Head (better accuracy)
 ```bash
-# Dataset already loaded — skip preprocessing
+# First mount Drive for checkpoint backup
+from google.colab import drive
+drive.mount('/content/drive')
+
 # Train (projection head only, ~2-3h on T4)
-!python src/train.py --config configs/train_config.yaml
+# --drive-path auto-syncs best checkpoints to Google Drive every epoch
+!python src/train.py --config configs/train_config.yaml --drive-path /content/drive/MyDrive/RetinaScan/checkpoints
 
 # Evaluate trained model
-!python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
+!python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt --drive-path /content/drive/MyDrive/RetinaScan/logs
 
 # Grad-CAM on sample
 !python src/evaluate/gradcam.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt --image data/raw/sample.jpeg
