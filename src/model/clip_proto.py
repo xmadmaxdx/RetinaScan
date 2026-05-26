@@ -19,8 +19,8 @@ class CoralOrdinalHead(nn.Module):
 
     def predict(self, x, threshold=0.0):
         logits = self.forward(x)
+        grades = (logits > threshold).sum(dim=-1)
         probs = torch.sigmoid(logits)
-        grades = (probs > threshold).sum(dim=-1)
         return grades, probs
 
 
@@ -118,8 +118,7 @@ class CLIPZeroShotNetwork(nn.Module):
         proto_logits, projected, ordinal_logits = self.forward(images)
         if self.use_ordinal and ordinal_logits is not None:
             cal_ord = ordinal_logits / self.ordinal_temperature
-            ord_probs = torch.sigmoid(cal_ord)
-            grades = (ord_probs > 0.0).sum(dim=-1)
+            grades = (cal_ord > 0.0).sum(dim=-1)
             cal_proto = proto_logits / self.prototype_temperature
             probs = torch.softmax(cal_proto, dim=-1)
             return grades, probs
@@ -148,8 +147,7 @@ class CLIPZeroShotNetwork(nn.Module):
                 if self.use_ordinal and not self.zero_shot_only:
                     ordinal_logits = self.ordinal_head(proj)
                     cal_ord = ordinal_logits / self.ordinal_temperature
-                    ordinal_probs = torch.sigmoid(cal_ord)
-                    grades = (ordinal_probs > 0.0).sum(dim=-1)
+                    grades = (cal_ord > 0.0).sum(dim=-1)
                 else:
                     grades = proto_logits.argmax(dim=-1)
                 cal_proto = proto_logits / self.prototype_temperature
