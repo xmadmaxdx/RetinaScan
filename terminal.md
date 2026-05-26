@@ -76,30 +76,34 @@ print(f"Loaded {len(ds)} images — already cropped and resized")
 ```
 
 ### Option B: Train Projection Head (better accuracy)
-```bash
-# First mount Drive for checkpoint backup
+
+Mount Drive first:
+```python
 from google.colab import drive
 drive.mount('/content/drive')
+```
 
-# Train (projection head only, ~2-3h on T4)
-# --drive-path auto-syncs best + latest checkpoints to Google Drive every epoch
+Train (~20-30 min for 10 epochs on T4):
+```bash
 !python src/train.py --config configs/train_config.yaml --drive-path /content/drive/MyDrive/RetinaScan/checkpoints
+```
 
-# Resume after disconnect (copies Drive checkpoint back, then resumes)
-!cp /content/drive/MyDrive/RetinaScan/checkpoints/latest.pt checkpoints/latest.pt
-!python src/train.py --config configs/train_config.yaml --drive-path /content/drive/MyDrive/RetinaScan/checkpoints --resume
-
-# Evaluate trained model
+Evaluate trained model:
+```bash
 !python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt --drive-path /content/drive/MyDrive/RetinaScan/logs
+```
 
-# Grad-CAM on sample
+Grad-CAM on a sample:
+```bash
 !python src/evaluate/gradcam.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt --image data/raw/sample.jpeg
+```
 
-# Export ONNX
+Export ONNX:
+```bash
 !python deploy/export_onnx.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
 ```
 
-**Resume after crash:**
+**Resume after crash/disconnect:**
 ```bash
 !cp /content/drive/MyDrive/RetinaScan/checkpoints/latest.pt checkpoints/latest.pt
 !python src/train.py --config configs/train_config.yaml --drive-path /content/drive/MyDrive/RetinaScan/checkpoints --resume
