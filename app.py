@@ -1,19 +1,13 @@
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import gradio as gr
 import torch
-import torch.nn.functional as F
 import numpy as np
 from PIL import Image
 from torchvision import transforms
-import os
-
-try:
-    from src.model.clip_proto import CLIPZeroShotNetwork
-    from src.model.prototype_bank import SEVERITY_LABELS, SEVERITY_DESCRIPTIONS
-except ImportError:
-    import sys
-    sys.path.append(os.path.dirname(__file__))
-    from src.model.clip_proto import CLIPZeroShotNetwork
-    from src.model.prototype_bank import SEVERITY_LABELS, SEVERITY_DESCRIPTIONS
+from src.model.clip_proto import CLIPZeroShotNetwork
+from src.model.prototype_bank import SEVERITY_LABELS, SEVERITY_DESCRIPTIONS
 
 
 CONFIG = {
