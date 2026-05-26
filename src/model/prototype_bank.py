@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import open_clip
 
 
 SEVERITY_DESCRIPTIONS = [
@@ -29,10 +30,7 @@ class TextPrototypeBank(nn.Module):
         self.num_prototypes = len(self.descriptions)
 
         with torch.no_grad():
-            text_tokens = clip_model.tokenizer(self.descriptions)
-            tdim = clip_model.context_length
-            if text_tokens.shape[-1] > tdim:
-                text_tokens = text_tokens[:, :tdim]
+            text_tokens = open_clip.tokenize(self.descriptions)
             text_tokens = text_tokens.to(next(clip_model.parameters()).device)
             text_features = clip_model.encode_text(text_tokens).float()
             self.register_buffer("raw_text_features", F.normalize(text_features, dim=-1))
