@@ -73,6 +73,17 @@ The app shows alternative plausible grades when confidence is low, so clinicians
 
 Additionally, the projection head includes **dropout layers** for **MC Dropout** support — after retraining with dropout, uncertainty estimates further improve.
 
+### Confidence Calibration (Truthful Confidence)
+
+A model that says "90% confident" should be right 90% of the time. RetinaScan uses **post-hoc temperature scaling** — a single learned parameter per head that scales logits to produce well-calibrated probabilities:
+
+- **ECE (Expected Calibration Error)** measured before and after scaling
+- **Ordinal temperature** scales the 4 binary logits before sigmoid
+- **Prototype temperature** scales the 5-class logits before softmax
+- Temperatures are optimized on the **validation set** via L-BFGS (seconds, not hours)
+
+**Clinical value**: When the app says "85% confident — Grade 2", that 85% is truthful. A clinician can set their own threshold (e.g., "only trust predictions above 90% confidence") with known precision.
+
 ### Ordinal Regression Head (Clinical Accuracy)
 
 Diabetic retinopathy grading is inherently **ordinal** — misclassifying Grade 3 as Grade 4 is clinically acceptable, but Grade 0 as Grade 4 is dangerous. Standard cross-entropy treats all errors equally, which is wrong for this task.
@@ -114,6 +125,7 @@ RetinaScan/
 ├── data/processed/                # Preprocessed images
 ├── src/
 │   ├── preprocess.py              # CLAHE + Ben Graham + crop-to-circle
+│   ├── calibrate.py               # Post-hoc temperature scaling (ECE optimization)
 │   ├── train.py                   # Training loop (CSV-based, patient-level split)
 │   ├── model/
 │   │   ├── clip_proto.py          # CLIP dual encoder (image + text)
@@ -158,6 +170,7 @@ python src/evaluate/metrics.py --config configs/train_config.yaml
 ```bash
 # Dataset loads automatically from HuggingFace — no download step needed
 python src/train.py --config configs/train_config.yaml
+python src/calibrate.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
 python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
 ```
 

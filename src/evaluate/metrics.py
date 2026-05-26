@@ -34,6 +34,20 @@ def get_eval_dataset(config):
     return EyePACSDataset(csv_path, image_dir, transform=transform)
 
 
+def expected_calibration_error(labels, probs, n_bins=10):
+    confs, preds = probs.max(dim=-1)
+    accs = (preds == labels).float()
+    bounds = torch.linspace(0, 1, n_bins + 1)
+    ece = 0.0
+    for i in range(n_bins):
+        lo, hi = bounds[i], bounds[i + 1]
+        mask = (confs > lo) & (confs <= hi)
+        n = mask.sum()
+        if n > 0:
+            ece += (accs[mask].mean() - confs[mask].mean()).abs().item() * n.item() / len(labels)
+    return ece
+
+
 def sync_to_drive(src_path, drive_dir):
     if not os.path.exists(drive_dir):
         os.makedirs(drive_dir, exist_ok=True)
@@ -49,6 +63,9 @@ def evaluate(config, checkpoint_path=None, drive_path=None):
     if checkpoint_path and os.path.exists(checkpoint_path):
         ckpt = torch.load(checkpoint_path, map_location=device)
         model.load_state_dict(ckpt["model_state_dict"], strict=False)
+        if "ordinal_temperature" in ckpt:
+            model.set_temperatures(ord_temp=ckpt["ordinal_temperature"], proto_temp=ckpt["prototype_temperature"])
+            print(f"Loaded temperatures: ordinal={ckpt['ordinal_temperature']:.3f}, prototype={ckpt['prototype_temperature']:.3f}")
         print(f"Loaded checkpoint: {checkpoint_path}")
     else:
         print("No checkpoint — running pure zero-shot evaluation")
@@ -71,11 +88,16 @@ def evaluate(config, checkpoint_path=None, drive_path=None):
     f1_macro = f1_score(all_labels, all_preds, average="macro")
     f1_weighted = f1_score(all_labels, all_preds, average="weighted")
 
+    probs_tensor = torch.tensor(all_probs)
+    labels_tensor = torch.tensor(all_labels)
+    ece = expected_calibration_error(labels_tensor, probs_tensor)
+
     print(f"\n{'='*50}")
     print(f"Zero-Shot Accuracy:  {acc:.4f}")
     print(f"Quadratic Kappa:     {kappa:.4f}")
     print(f"F1 Macro:            {f1_macro:.4f}")
     print(f"F1 Weighted:         {f1_weighted:.4f}")
+    print(f"ECE (calibration):   {ece:.4f}")
     print(f"{'='*50}\n")
 
     print("Classification Report:")

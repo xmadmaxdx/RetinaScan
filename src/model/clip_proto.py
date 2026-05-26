@@ -70,6 +70,9 @@ class CLIPZeroShotNetwork(nn.Module):
                 input_dim=self.prototype_dim, num_tasks=4
             ).to(self.device)
 
+        self.ordinal_temperature = nn.Parameter(torch.tensor(1.0), requires_grad=False)
+        self.prototype_temperature = nn.Parameter(torch.tensor(1.0), requires_grad=False)
+
         if self.zero_shot_only:
             for p in self.projection.parameters():
                 p.requires_grad = False
@@ -114,10 +117,14 @@ class CLIPZeroShotNetwork(nn.Module):
             return self.zero_shot_predict(images)
         proto_logits, projected, ordinal_logits = self.forward(images)
         if self.use_ordinal and ordinal_logits is not None:
-            grades, _ = self.ordinal_head.predict(projected)
-            probs = torch.softmax(proto_logits, dim=-1)
+            cal_ord = ordinal_logits / self.ordinal_temperature
+            ord_probs = torch.sigmoid(cal_ord)
+            grades = (ord_probs > 0.0).sum(dim=-1)
+            cal_proto = proto_logits / self.prototype_temperature
+            probs = torch.softmax(cal_proto, dim=-1)
             return grades, probs
-        probs = torch.softmax(proto_logits, dim=-1)
+        cal_proto = proto_logits / self.prototype_temperature
+        probs = torch.softmax(cal_proto, dim=-1)
         grades = proto_logits.argmax(dim=-1)
         return grades, probs
 
@@ -137,15 +144,16 @@ class CLIPZeroShotNetwork(nn.Module):
             with torch.no_grad():
                 raw = self.clip_model.encode_image(batch).float()
                 proj = F.normalize(self.projection(raw), dim=-1)
+                proto_logits, _ = self.prototypes(proj, self.projection)
                 if self.use_ordinal and not self.zero_shot_only:
                     ordinal_logits = self.ordinal_head(proj)
-                    ordinal_probs = torch.sigmoid(ordinal_logits)
+                    cal_ord = ordinal_logits / self.ordinal_temperature
+                    ordinal_probs = torch.sigmoid(cal_ord)
                     grades = (ordinal_probs > 0.0).sum(dim=-1)
                 else:
-                    proto_logits, _ = self.prototypes(proj, self.projection)
                     grades = proto_logits.argmax(dim=-1)
-                proto_logits, _ = self.prototypes(proj, self.projection)
-                probs = torch.softmax(proto_logits, dim=-1)
+                cal_proto = proto_logits / self.prototype_temperature
+                probs = torch.softmax(cal_proto, dim=-1)
             all_grades.append(grades)
             all_probs.append(probs)
         self.eval()
@@ -157,6 +165,12 @@ class CLIPZeroShotNetwork(nn.Module):
         max_entropy = torch.log(torch.tensor(5.0, device=device))
         confidence = 1.0 - (entropy / max_entropy)
         return mean_grade, confidence, mean_probs
+
+    def set_temperatures(self, ord_temp=None, proto_temp=None):
+        if ord_temp is not None:
+            self.ordinal_temperature.fill_(ord_temp)
+        if proto_temp is not None:
+            self.prototype_temperature.fill_(proto_temp)
 
     def get_text_prototypes(self):
         return self.prototypes.get_prototypes(projection=self.projection)

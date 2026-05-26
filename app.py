@@ -30,6 +30,9 @@ checkpoint_path = "checkpoints/best.pt"
 if os.path.exists(checkpoint_path):
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=True)
     model.load_state_dict(ckpt["model_state_dict"], strict=False)
+    if "ordinal_temperature" in ckpt:
+        model.set_temperatures(ord_temp=ckpt["ordinal_temperature"], proto_temp=ckpt["prototype_temperature"])
+        print(f"Loaded temperatures: ordinal={ckpt['ordinal_temperature']:.3f}, prototype={ckpt['prototype_temperature']:.3f}")
     print(f"Loaded checkpoint: {checkpoint_path}")
 else:
     print("No checkpoint found — running in pure zero-shot mode")
@@ -106,6 +109,7 @@ demo = gr.Interface(
         "Uncertainty is estimated via **test-time augmentation** (20 runs): "
         "if confidence is low, alternative grades are shown — indicating the "
         "model needs a clearer image or is near a decision boundary.\n\n"
+        "Confidence scores are **temperature-calibrated** to match true accuracy.\n\n"
         f"### Prototype Descriptions\n{description_text}"
     ),
     examples=[["data/raw/sample.jpeg"]] if os.path.exists("data/raw/sample.jpeg") else None,
