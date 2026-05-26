@@ -72,7 +72,7 @@ def evaluate(config, checkpoint_path=None):
     print(f"{'='*50}\n")
 
     print("Classification Report:")
-    print(classification_report(all_labels, all_preds, target_names=SEVERITY_LABELS, digits=4))
+    print(classification_report(all_labels, all_preds, target_names=SEVERITY_LABELS, digits=4, zero_division=0))
 
     cm = confusion_matrix(all_labels, all_preds)
     plt.figure(figsize=(8, 6))

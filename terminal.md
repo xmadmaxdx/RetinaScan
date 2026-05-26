@@ -56,6 +56,7 @@ print(f"Loaded {len(ds)} images — already cropped and resized")
 ```bash
 !pip install onnx==1.16.0
 !pip install onnxruntime-gpu==1.17.1
+!pip install onnxscript
 ```
 
 ### 8. Verify everything

@@ -66,6 +66,20 @@ def overlay_heatmap(img_np, cam, alpha=0.5):
     return overlay
 
 
+def maybe_download_image(image_path):
+    if os.path.exists(image_path):
+        return image_path
+    print(f"{image_path} not found — downloading sample retina image...")
+    import requests
+    url = "https://raw.githubusercontent.com/HzFu/EyeQ/master/Examples/0.jpg"
+    os.makedirs(os.path.dirname(image_path), exist_ok=True)
+    r = requests.get(url, timeout=30)
+    with open(image_path, "wb") as f:
+        f.write(r.content)
+    print(f"Downloaded -> {image_path}")
+    return image_path
+
+
 def main(config, checkpoint_path, image_path, save_dir="outputs/gradcam"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -88,6 +102,7 @@ def main(config, checkpoint_path, image_path, save_dir="outputs/gradcam"):
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
 
+    image_path = maybe_download_image(image_path)
     img_pil = Image.open(image_path).convert("RGB")
     img_tensor = transform(img_pil).unsqueeze(0).to(device)
     img_np = np.array(img_pil.resize((config["data"]["image_size"], config["data"]["image_size"])))
