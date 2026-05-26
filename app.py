@@ -1,6 +1,7 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from copy import deepcopy
 import gradio as gr
 import torch
 import numpy as np
@@ -24,10 +25,10 @@ CONFIG = {
 }
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = CLIPZeroShotNetwork(CONFIG, device=device)
 
 checkpoint_path = "checkpoints/best.pt"
 if os.path.exists(checkpoint_path):
+    model = CLIPZeroShotNetwork(CONFIG, device=device)
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=True)
     model.load_state_dict(ckpt["model_state_dict"], strict=False)
     if "ordinal_temperature" in ckpt:
@@ -36,6 +37,12 @@ if os.path.exists(checkpoint_path):
     print(f"Loaded checkpoint: {checkpoint_path}")
 else:
     print("No checkpoint found — running in pure zero-shot mode")
+    zs_config = deepcopy(CONFIG)
+    zs_config["model"]["zero_shot_only"] = True
+    model = CLIPZeroShotNetwork(zs_config, device=device)
+    zs_config = deepcopy(CONFIG)
+    zs_config["model"]["zero_shot_only"] = True
+    model = CLIPZeroShotNetwork(zs_config, device=device)
 
 model.eval()
 

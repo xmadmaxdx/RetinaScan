@@ -1,6 +1,7 @@
 import sys, os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
+from copy import deepcopy
 import csv
 import yaml
 import argparse
@@ -48,8 +49,8 @@ def sync_to_drive(src_path, drive_dir):
 def evaluate(config, checkpoint_path=None, drive_path=None):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model = CLIPZeroShotNetwork(config, device=device)
     if checkpoint_path and os.path.exists(checkpoint_path):
+        model = CLIPZeroShotNetwork(config, device=device)
         ckpt = torch.load(checkpoint_path, map_location=device)
         model.load_state_dict(ckpt["model_state_dict"], strict=False)
         if "ordinal_temperature" in ckpt:
@@ -58,6 +59,9 @@ def evaluate(config, checkpoint_path=None, drive_path=None):
         print(f"Loaded checkpoint: {checkpoint_path}")
     else:
         print("No checkpoint — running pure zero-shot evaluation")
+        zs_config = deepcopy(config)
+        zs_config["model"]["zero_shot_only"] = True
+        model = CLIPZeroShotNetwork(zs_config, device=device)
 
     model.eval()
 
