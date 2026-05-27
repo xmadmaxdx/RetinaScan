@@ -223,14 +223,43 @@ def train_epoch(model, loader, optimizer, loss_coral, loss_proto, device, epoch=
 @torch.no_grad()
 def validate(model, loader, device):
     model.eval()
-    correct = 0
-    total = 0
+    if model.zero_shot_only:
+        correct = 0
+        total = 0
+        for images, labels in tqdm(loader, desc="Val"):
+            images, labels = images.to(device), labels.to(device)
+            grades, _ = model.predict_grade(images)
+            correct += (grades == labels).sum().item()
+            total += labels.size(0)
+        acc = correct / total
+        return acc, acc, 1.0
+
+    all_ord_logits = []
+    all_labels = []
     for images, labels in tqdm(loader, desc="Val"):
         images, labels = images.to(device), labels.to(device)
-        grades, probs = model.predict_grade(images)
-        correct += (grades == labels).sum().item()
-        total += labels.size(0)
-    return correct / total
+        _, _, ordinal_logits = model(images)
+        all_ord_logits.append(ordinal_logits.cpu())
+        all_labels.append(labels.cpu())
+
+    ord_logits = torch.cat(all_ord_logits)
+    labels_cat = torch.cat(all_labels)
+    n_total = len(labels_cat)
+
+    raw_preds = (ord_logits / model.ordinal_temperature.cpu() > 0.0).sum(dim=-1)
+    raw_acc = (raw_preds == labels_cat).float().mean().item()
+
+    best_correct = 0
+    best_temp = 1.0
+    for t in [i * 0.1 for i in range(2, 51)]:
+        preds = (ord_logits / t > 0.0).sum(dim=-1)
+        n_correct = (preds == labels_cat).sum().item()
+        if n_correct > best_correct:
+            best_correct = n_correct
+            best_temp = t
+    cal_acc = best_correct / n_total
+
+    return raw_acc, cal_acc, best_temp
 
 
 def build_dataset(config, transform, split="train", heavy_transform=None):
@@ -324,8 +353,8 @@ def main(config, drive_path=None, resume=False):
 
     if mc.get("zero_shot_only", False):
         print("Pure zero-shot mode: no training, evaluating directly...")
-        val_acc = validate(model, val_loader, device)
-        print(f"Zero-shot validation accuracy: {val_acc:.4f}")
+        raw_acc, _, _ = validate(model, val_loader, device)
+        print(f"Zero-shot validation accuracy: {raw_acc:.4f}")
         return
 
     trainable_params = list(filter(lambda p: p.requires_grad, model.parameters()))
@@ -380,16 +409,16 @@ def main(config, drive_path=None, resume=False):
     for epoch in range(start_epoch, total_epochs):
         print(f"\nEpoch {epoch+1}/{total_epochs}")
         train_loss, train_metrics = train_epoch(model, train_loader, optimizer, loss_coral, loss_proto, device, epoch=epoch, scaler=scaler, grad_clip=grad_clip)
-        val_acc = validate(model, val_loader, device)
+        raw_acc, cal_acc, cal_temp = validate(model, val_loader, device)
         scheduler.step()
         lr = optimizer.param_groups[0]["lr"]
-        print(f"Loss: {train_loss:.4f} | Acc: {val_acc:.4f} | LR: {lr:.2e}")
-        print(f"  coral={train_metrics['coral_loss']:.4f} proto={train_metrics['proto_loss']:.4f}")
+        print(f"Loss: {train_loss:.4f} | Raw: {raw_acc:.4f} | Cal: {cal_acc:.4f} | LR: {lr:.2e}")
+        print(f"  coral={train_metrics['coral_loss']:.4f} proto={train_metrics['proto_loss']:.4f} temp={cal_temp:.2f}")
 
         save_checkpoint(latest_path, model, optimizer, scheduler, epoch, best_acc, drive_path)
 
-        if val_acc > best_acc:
-            best_acc = val_acc
+        if raw_acc > best_acc:
+            best_acc = raw_acc
             save_checkpoint(best_path, model, optimizer, scheduler, epoch, best_acc, drive_path)
 
     if drive_path:
