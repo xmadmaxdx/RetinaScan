@@ -160,19 +160,23 @@ def evaluate(config, checkpoint_path=None, drive_path=None, tune_thresholds=True
     all_preds, all_labels, all_probs, all_ord_logits = [], [], [], []
     for images, labels in loader:
         images = images.to(device)
-        proto_logits, projected, ordinal_logits = model(images)
-        if model.use_ordinal and ordinal_logits is not None:
-            cal_ord = ordinal_logits / model.ordinal_temperature
-            grades = (cal_ord > 0.0).sum(dim=-1)
-            cal_proto = proto_logits / model.prototype_temperature
-            probs = torch.softmax(cal_proto, dim=-1)
+        if model.zero_shot_only:
+            grades, probs = model.predict_grade(images)
+            ordinal_logits = None
         else:
-            grades = proto_logits.argmax(dim=-1)
-            probs = torch.softmax(proto_logits, dim=-1)
+            proto_logits, projected, ordinal_logits = model(images)
+            if ordinal_logits is not None:
+                cal_ord = ordinal_logits / model.ordinal_temperature
+                grades = (cal_ord > 0.0).sum(dim=-1)
+                cal_proto = proto_logits / model.prototype_temperature
+                probs = torch.softmax(cal_proto, dim=-1)
+            else:
+                grades = proto_logits.argmax(dim=-1)
+                probs = torch.softmax(proto_logits, dim=-1)
         all_preds.extend(grades.cpu().tolist())
         all_labels.extend(labels.tolist())
         all_probs.extend(probs.cpu().tolist())
-        if ordinal_logits is not None:
+        if not model.zero_shot_only and ordinal_logits is not None:
             all_ord_logits.append(ordinal_logits.cpu())
 
     labels_np = np.array(all_labels)
