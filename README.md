@@ -1,40 +1,51 @@
-# RetinaScan — Zero-Shot Diabetic Retinopathy Grading
+# RetinaScan — Diabetic Retinopathy Grading with CLIP-Guided Prototypes
 
 [![Hugging Face](https://img.shields.io/badge/HF-Space-blue)](https://huggingface.co/spaces/YOUR_USER/retinascan)
-[![Colab](https://img.shields.io/badge/Open%20in-Colab-orange)](https://colab.research.google.com/github/YOUR_USER/RetinaScan/blob/main/notebooks/Train.ipynb)
+[![Colab](https://img.shields.io/badge/Open%20in-Colab-orange)](https://colab.research.google.com/drive/1RRsy4PRRXe51wuCGWgxvnXKe8kJf9n8e?usp=sharing)
 
-Grades retinopathy severity (Grade 0–4) **without requiring labeled retina data at training time**, using **CLIP text-guided visual prototypes**.
+RetinaScan grades diabetic retinopathy severity (Grade 0–4) using CLIP vision-language models. It works in two modes — **zero-shot** (no training, instant) or **projection-tuned** (trained, higher accuracy). The core idea is simple: instead of learning what each grade looks like from scratch, we encode clinical descriptions through CLIP's text encoder and compare them to image features.
 
 ## The Problem
 
 > 80% of diabetic patients in low-income countries never receive retina screening due to specialist scarcity. Existing graders need thousands of labeled images per clinic.
 
-## Current Status
+## Results
 
-### 1. The Core Problem We Worked Through
-The model fell into a majority-class collapse — because 87% of the data is Grade 0 (normal), it guessed "Grade 0" for everything. This gave a deceptive 72.62% baseline accuracy but zero ability to detect actual disease stages. We broke through it with three changes:
+Zero-shot CLIP alone cannot separate DR severity — the text embeddings for different grades are too close in joint space, so every image maps to "No DR" (72.62% accuracy, 0% recall on Grades 1–4). Training the projection head is required.
 
-* **Custom balanced sampler:** 8 images per class in every batch so the model sees all grades equally.
-* **Layer uncoupling:** Expanded the decision head so each disease stage gets its own parameter vectors.
-* **Multi-task loss:** Combined prototype loss (text matching) with CORAL loss (ordinal ranking).
+After 50 epochs of phased multi-task training with a balanced sampler, the model reached these numbers:
 
-### 2. Training Telemetry (Epochs 1–18)
-**Warmup phase (epochs 1–5):** Focused on text-matching. Total loss dropped to 0.3961 while accuracy dipped to 7.44% as the model organised its feature space before setting decision boundaries.
+| Metric | Default Thresholds | After Threshold Tuning |
+|--------|:------------------:|:----------------------:|
+| Accuracy | 51.03% | **63.19%** |
+| Quadratic Kappa | 0.3731 | **0.4181** |
+| F1 Weighted | 0.5678 | **0.6475** |
+| MAE (grade error) | 0.5912 | **0.5692** |
+| Off-by-1 Accuracy | 91.37% | 80.80% |
+| ECE (calibration) | 0.0468 | — |
+| | **best.pt (Epoch 24)** | |
 
-**Boundary shift (epochs 6–14):** Activated CORAL loss. Accuracy climbed to 21.88%, peaking at 35.01% by epoch 12.
+The final model (epoch 50) has similar accuracy (62.82%) but better ordinal metrics — higher kappa (0.4455), lower MAE (0.5393), and higher off-by-1 accuracy (84.30%). It makes safer mistakes by keeping predictions closer to the true grade.
 
-**Validation jitter (epochs 15–18):** Accuracy swung between 35% and 21.91%. This wasn't a bug — with imbalanced data, small boundary adjustments shift large blocks of predictions. Losses kept hitting new lows.
+| Grade | Precision | Recall | F1 | Support |
+|-------|:---------:|:------:|:--:|:-------:|
+| Grade 0 — No DR | 84.62% | 63.58% | 72.61% | 2570 |
+| Grade 1 — Mild NPDR | 6.47% | 39.22% | 11.11% | 232 |
+| Grade 2 — Moderate NPDR | 38.24% | 11.88% | 18.13% | 547 |
+| Grade 3 — Severe NPDR | 50.00% | 1.20% | 2.35% | 83 |
+| Grade 4 — Proliferative DR | 0.00% | 0.00% | 0.00% | 78 |
 
-### 3. Runtime Interruption & Recovery
-The Colab runtime reached its resource limit at epoch 18. After restoring the checkpoint in a fresh session, we ran calibration to optimise decision boundaries before resuming training from epoch 19.
+Low recall on Grades 3–4 is expected — only 83 and 78 samples respectively. The model simply never sees enough examples of these grades to learn them well. More data for minority classes would be the main lever for improvement.
 
-### 4. Breakthrough (Epochs 19–25)
-Calibration before the restart dropped ECE from 0.1427 to 0.0923. At epoch 24, validation accuracy hit **51.03%** — the highest yet — with total loss at its lowest (0.3001) and both coral (0.2428) and proto (0.2864) losses at all-time lows.
+### Confusion Matrices
 
-### 5. Final Phase Plan
-* Run to epoch 50 — let the cosine annealing LR decay fully.
-* Final calibration run on `best.pt` for optimal decision boundaries.
-* Full evaluation with calibrated thresholds to get the stable classification metrics.
+| Default thresholds | Tuned thresholds |
+|:---:|:---:|
+| <img src="logs/confusion_matrix_best.png" width="300"> | <img src="logs/confusion_matrix_tuned_best.png" width="300"> |
+
+### Reliability Diagram
+
+<img src="logs/reliability_diagram_best.png" width="400">
 
 ## Impact
 
@@ -132,21 +143,12 @@ Both heads share the same learned projection features, so the interpretability o
 
 | Mode | Training Data | Use Case |
 |------|--------------|----------|
-| **Pure Zero-Shot** | None — just CLIP | Instant deploy, no training |
-| **Projection Tuning** | Labeled retina | Higher accuracy, trained ordinal head |
+| **Zero-Shot** | None — just CLIP text descriptions | Instant deploy, no GPU needed |
+| **Projection Tuning** | Labeled retina images | Higher accuracy, trained ordinal head |
 
-## Results
+## Training Journey
 
-| Metric | Zero-Shot | With Projection Tuning |
-|--------|-----------|----------------------|
-| Accuracy | 72.62% | TBD |
-| Quadratic Kappa | 0.0169 | TBD |
-| F1 (weighted) | 0.6240 | TBD |
-| ECE (calibration) | 0.4764 | TBD |
-
-<img src="assets/zero_shot_confusion_matrix.png" width="400">
-
-> **Zero-shot is Grade-0-only** (98.3% recall on Grade 0, 0% on Grades 1–4). CLIP's text embeddings for disease severity are too close in its joint embedding space, so all images map to "No DR." Training the projection + ordinal head is required for meaningful multi-grade discrimination.
+The full training history — every bug, fix, calibration run, and epoch log — is documented in [journey.md](journey.md).
 
 ## Project Structure
 
@@ -176,7 +178,9 @@ RetinaScan/
 │   └── Evaluate.ipynb
 ├── app.py                         # Gradio interface (HF Spaces)
 ├── terminal.md                    # Colab installation guide
+├── journey.md                     # Full training history and debugging log
 ├── requirements.txt
+├── logs/                          # Confusion matrices, reliability diagrams
 └── README.md
 ```
 
@@ -197,7 +201,7 @@ pip install -r requirements.txt
 python src/evaluate/metrics.py --config configs/train_config.yaml
 ```
 
-### With Projection Tuning (Colab T4, ~2-3h)
+### With Projection Tuning (Colab T4, ~14-15h)
 ```bash
 # Dataset loads automatically from HuggingFace — no download step needed
 python src/train.py --config configs/train_config.yaml
@@ -221,7 +225,7 @@ python src/evaluate/gradcam.py --config configs/train_config.yaml --checkpoint c
 
 ```bibtex
 @misc{retinascan2026,
-  title={RetinaScan: Zero-Shot Diabetic Retinopathy Grading via CLIP Text-Guided Visual Prototypes},
+  title={RetinaScan: Diabetic Retinopathy Grading via CLIP Text-Guided Visual Prototypes},
   author={Simanta Das},
   year={2026}
 }
