@@ -10,13 +10,14 @@ from torchvision import transforms
 from tqdm import tqdm
 import numpy as np
 from src.model.clip_proto import CLIPZeroShotNetwork
-from src.losses.proto_loss import TextPrototypeLoss
+from src.losses.balanced_loss import ClassWeightedCORALLoss, PrototypeFocalLoss
 
 
 class HuggingFaceEyePACSDataset(Dataset):
     def __init__(self, hf_dataset_name="bumbledeep/eyepacs", split="train", transform=None):
         from datasets import load_dataset
         self.ds = load_dataset(hf_dataset_name, split=split, streaming=False)
+        self.labels = self.ds["label_code"]
         self.transform = transform
 
     def __len__(self):
@@ -36,16 +37,22 @@ class EyePACSDataset(Dataset):
         self.image_dir = image_dir
         self.transform = transform
         self.samples = []
+        self._labels = []
         with open(csv_path, newline="") as f:
             reader = csv.reader(f)
             next(reader, None)
             for row in reader:
                 image_id, label = row[0], int(row[1])
+                self._labels.append(label)
                 for ext in [".jpeg", ".jpg", ".png"]:
                     path = os.path.join(image_dir, image_id + ext)
                     if os.path.exists(path):
                         self.samples.append((path, label))
                         break
+
+    @property
+    def labels(self):
+        return self._labels
 
     def __len__(self):
         return len(self.samples)
@@ -72,6 +79,41 @@ class EyePACSWithPatientID(EyePACSDataset):
     def __getitem__(self, idx):
         img, label = super().__getitem__(idx)
         return img, label, self.patient_ids[idx]
+
+
+class BalancedStageSampler(Sampler):
+    def __init__(self, labels, batch_size):
+        self.labels = np.array(labels)
+        self.batch_size = batch_size
+        self.num_classes = 5
+        self.per_class = batch_size // self.num_classes
+        assert batch_size % self.num_classes == 0, "batch_size must be multiple of 5"
+        self.class_indices = {c: np.where(self.labels == c)[0] for c in range(self.num_classes)}
+        self.num_batches = len(self.labels) // batch_size
+
+    def __iter__(self):
+        for c in range(self.num_classes):
+            np.random.shuffle(self.class_indices[c])
+        ptr = {c: 0 for c in range(self.num_classes)}
+        indices = []
+        for _ in range(self.num_batches):
+            batch = []
+            for c in range(self.num_classes):
+                start = ptr[c]
+                end = start + self.per_class
+                if end > len(self.class_indices[c]):
+                    np.random.shuffle(self.class_indices[c])
+                    start = 0
+                    end = self.per_class
+                    ptr[c] = 0
+                batch.extend(self.class_indices[c][start:end].tolist())
+                ptr[c] = end
+            np.random.shuffle(batch)
+            indices.extend(batch)
+        return iter(indices)
+
+    def __len__(self):
+        return self.num_batches * self.batch_size
 
 
 def get_train_transform(config):
@@ -113,37 +155,45 @@ def patient_level_split(dataset, train_ratio=0.8, val_ratio=0.1, seed=42):
     return train_idx, val_idx, test_idx
 
 
-def train_epoch(model, loader, optimizer, criterion, device, scaler=None, grad_clip=1.0):
+def train_epoch(model, loader, optimizer, loss_coral, loss_proto, device, scaler=None, grad_clip=1.0):
     model.train()
     total_loss = 0
-    metrics = {"sup_loss": 0, "align_loss": 0, "entropy_loss": 0, "diversity_loss": 0, "ordinal_loss": 0}
+    coral_loss_sum = 0
+    proto_loss_sum = 0
     pbar = tqdm(loader, desc="Train")
     for images, labels in pbar:
         images, labels = images.to(device), labels.to(device)
         optimizer.zero_grad()
 
         with torch.amp.autocast("cuda", enabled=(scaler is not None)):
-            logits, projected, ordinal_logits = model(images)
+            _, projected, ordinal_logits = model(images)
             text_protos = model.get_text_prototypes()
-            losses = criterion(logits, projected, text_protos, labels=labels, ordinal_logits=ordinal_logits)
+
+            targets = torch.zeros(len(labels), 4, device=device)
+            for k in range(4):
+                targets[:, k] = (labels > k).float()
+
+            lc = loss_coral(ordinal_logits, targets)
+            lp = loss_proto(projected, text_protos, labels)
+            loss = lc + 0.4 * lp
 
         if scaler:
-            scaler.scale(losses["loss"]).backward()
+            scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
             scaler.step(optimizer)
             scaler.update()
         else:
-            losses["loss"].backward()
+            loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
             optimizer.step()
 
-        total_loss += losses["loss"].item()
-        for k in metrics:
-            metrics[k] += losses[k]
-        pbar.set_postfix(loss=losses["loss"].item())
+        total_loss += loss.item()
+        coral_loss_sum += lc.item()
+        proto_loss_sum += lp.item()
+        pbar.set_postfix(loss=loss.item())
     n = len(loader)
-    return total_loss / n, {k: v / n for k, v in metrics.items()}
+    return total_loss / n, {"coral_loss": coral_loss_sum / n, "proto_loss": proto_loss_sum / n}
 
 
 @torch.no_grad()
@@ -241,7 +291,9 @@ def main(config, drive_path=None, resume=False):
     train_ds = build_dataset(config, get_train_transform(config), split="train")
     val_ds = build_dataset(config, get_val_transform(config), split="val")
 
-    train_loader = DataLoader(train_ds, batch_size=config["training"]["batch_size"], shuffle=True, num_workers=2)
+    train_labels = [train_ds.dataset.labels[i] for i in train_ds.indices]
+    train_sampler = BalancedStageSampler(train_labels, batch_size=config["training"]["batch_size"])
+    train_loader = DataLoader(train_ds, batch_size=config["training"]["batch_size"], sampler=train_sampler, num_workers=2)
     val_loader = DataLoader(val_ds, batch_size=config["training"]["batch_size"], shuffle=False, num_workers=2)
 
     model = CLIPZeroShotNetwork(config, device=device)
@@ -276,13 +328,8 @@ def main(config, drive_path=None, resume=False):
         )
     else:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_epochs)
-    criterion = TextPrototypeLoss(
-        temperature=config["model"]["temperature"],
-        entropy_weight=config["loss"]["entropy_weight"],
-        diversity_weight=config["loss"]["diversity_weight"],
-        supervised_weight=config["loss"]["supervised_weight"],
-        ordinal_weight=config["loss"].get("ordinal_weight", 0.5),
-    )
+    loss_coral = ClassWeightedCORALLoss()
+    loss_proto = PrototypeFocalLoss(gamma=2.5)
 
     ckpt_dir = config["paths"]["checkpoint_dir"]
     latest_path = os.path.join(ckpt_dir, "latest.pt")
@@ -308,12 +355,12 @@ def main(config, drive_path=None, resume=False):
 
     for epoch in range(start_epoch, total_epochs):
         print(f"\nEpoch {epoch+1}/{total_epochs}")
-        train_loss, train_metrics = train_epoch(model, train_loader, optimizer, criterion, device, scaler, grad_clip=grad_clip)
+        train_loss, train_metrics = train_epoch(model, train_loader, optimizer, loss_coral, loss_proto, device, scaler, grad_clip=grad_clip)
         val_acc = validate(model, val_loader, device)
         scheduler.step()
         lr = optimizer.param_groups[0]["lr"]
         print(f"Loss: {train_loss:.4f} | Acc: {val_acc:.4f} | LR: {lr:.2e}")
-        print(f"  sup={train_metrics['sup_loss']:.4f} align={train_metrics['align_loss']:.4f} ent={train_metrics['entropy_loss']:.4f} div={train_metrics['diversity_loss']:.4f} ord={train_metrics['ordinal_loss']:.4f}")
+        print(f"  coral={train_metrics['coral_loss']:.4f} proto={train_metrics['proto_loss']:.4f}")
 
         save_checkpoint(latest_path, model, optimizer, scheduler, epoch, best_acc, drive_path)
 

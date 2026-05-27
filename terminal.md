@@ -85,6 +85,7 @@ drive.mount('/content/drive')
 
 Train (~2.5h for 50 epochs on T4):
 ```bash
+# batch_size must be divisible by 5 (set to 40 in config for balanced batches)
 !python src/train.py --config configs/train_config.yaml --drive-path /content/drive/MyDrive/RetinaScan/checkpoints
 ```
 

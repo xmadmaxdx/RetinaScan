@@ -30,7 +30,7 @@ model:
 
 training:
   epochs: 50
-  batch_size: 32
+  batch_size: 40
   learning_rate: 0.0001
   weight_decay: 0.0001
   lr_scheduler: "cosine"
@@ -47,11 +47,8 @@ augmentation:
   vertical_flip: false
 
 loss:
-  proto_align_weight: 1.0
-  entropy_weight: 0.05
-  diversity_weight: 0.02
-  supervised_weight: 1.0
-  ordinal_weight: 1.0
+  # Dual loss: ClassWeightedCORALLoss + 0.4 * PrototypeFocalLoss(gamma=2.5)
+  # Hyperparameters are hardcoded in src/losses/balanced_loss.py
 
 paths:
   checkpoint_dir: "checkpoints"
