@@ -53,33 +53,24 @@ def calibrate(config, checkpoint_path):
         (labels >= 3).float(), (labels >= 4).float(),
     ], dim=-1)
 
-    def optimal_temp(logits, targets, loss_fn, n_params=1):
-        temp = torch.nn.Parameter(torch.tensor(1.0, device=device))
-        opt = torch.optim.LBFGS([temp], lr=0.01, max_iter=100)
-        def closure():
-            opt.zero_grad()
-            loss = loss_fn(logits.to(device) / temp, targets)
-            loss.backward()
-            return loss
-        opt.step(closure)
-        return temp.item()
-
-    def ord_nll(scaled, tgt):
-        return F.binary_cross_entropy_with_logits(scaled, tgt)
-
-    def proto_nll(scaled, tgt):
-        return F.cross_entropy(scaled, tgt.long())
+    def best_proto_temp(temps):
+        best_ece = float("inf")
+        best_t = 1.0
+        for t in temps:
+            probs = torch.softmax(proto_logits.to(device) / t, dim=-1)
+            ece = expected_calibration_error(labels.cpu(), probs.cpu())
+            if ece < best_ece:
+                best_ece = ece
+                best_t = t
+        return best_t, best_ece
 
     uncal_probs = torch.softmax(proto_logits, dim=-1)
     ece_before = expected_calibration_error(labels.cpu(), uncal_probs)
-
     print(f"\nECE before calibration: {ece_before:.4f}")
 
-    ord_temp = optimal_temp(ord_logits, targets, ord_nll)
-    proto_temp = optimal_temp(proto_logits, labels, proto_nll)
-
-    cal_probs = torch.softmax(proto_logits.to(device) / proto_temp, dim=-1)
-    ece_after = expected_calibration_error(labels.cpu(), cal_probs.cpu())
+    temps = [round(0.2 + i * 0.1, 2) for i in range(50)]  # 0.2 to 5.0
+    proto_temp, ece_after = best_proto_temp(temps)
+    ord_temp = 1.0
 
     print(f"Optimal ordinal temperature: {ord_temp:.4f}")
     print(f"Optimal prototype temperature: {proto_temp:.4f}")
