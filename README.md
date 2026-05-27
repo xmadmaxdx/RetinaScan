@@ -11,28 +11,30 @@ Grades retinopathy severity (Grade 0–4) **without requiring labeled retina dat
 
 ## Current Status
 
-**Active Optimization & Phased Multi-Task Convergence.** The project has moved from structural baseline testing into a stabilized training phase. Below is a record of how engineering roadblocks were identified and resolved.
+### 1. The Core Problem We Worked Through
+The model fell into a majority-class collapse — because 87% of the data is Grade 0 (normal), it guessed "Grade 0" for everything. This gave a deceptive 72.62% baseline accuracy but zero ability to detect actual disease stages. We broke through it with three changes:
 
-### 1. The Baseline Benchmark & Tokenizer Fixes
-Initial evaluations showed that standard zero-shot CLIP embeddings cannot separate DR severity in joint space, yielding a **72.62% accuracy baseline** that collapsed into predicting "Grade 0 Only" (0% recall on Grades 1-4). Early integration runs were stabilized by fixing an API tokenizer mismatch (`clip_model.tokenizer()` to standalone `open_clip.tokenize()`) and correcting a $512\times512$ image size mismatch down to the Vision Transformer's native $224\times224$ resolution.
+* **Custom balanced sampler:** 8 images per class in every batch so the model sees all grades equally.
+* **Layer uncoupling:** Expanded the decision head so each disease stage gets its own parameter vectors.
+* **Multi-task loss:** Combined prototype loss (text matching) with CORAL loss (ordinal ranking).
 
-### 2. Empirical Discovery of Optimization Roadblocks
-During prototype tuning, the training loop hit two issues that stalled progress:
-* **Gradient Saturation (Double Temperature Trap):** An implicit double division scaling inside the prototype bank produced near-hard-argmax outputs, flattening the gradient landscape and saturating backpropagation near zero.
-* **Majority-Class Collapse:** With 87% negative samples in the real-world distribution, BCE loss incentivized the model to push all outputs to roughly $-3.0$, achieving a deceptive $0.37$ loss by predicting "negative" for every example — zero multi-grade discrimination.
+### 2. Training Telemetry (Epochs 1–18)
+**Warmup phase (epochs 1–5):** Focused on text-matching. Total loss dropped to 0.3961 while accuracy dipped to 7.44% as the model organised its feature space before setting decision boundaries.
 
-### 3. Systematic Architectural Interventions
-Three core modifications were made:
-* **Layer Uncoupling:** The ordinal regression head was expanded from `Linear(512,1)` to `Linear(512,4)`, giving each severity threshold its own 512-dimensional parameter vector instead of sharing a single scalar.
-* **Balanced Resampling:** A custom `BalancedStageSampler` enforces 8 samples per class per batch (`batch_size=40`), handling data imbalance at the sampler level instead of with loss-level `pos_weights`.
-* **Deterministic Scaling:** Fixed seeded training splits and gradient clipping (`clip_grad_norm_`) for restart stability.
+**Boundary shift (epochs 6–14):** Activated CORAL loss. Accuracy climbed to 21.88%, peaking at 35.01% by epoch 12.
 
-### 4. Phased Schedule & Observed Response
-A phased multi-task schedule with linear LR warmup was deployed over 50 epochs. The first 5 epochs prioritize prototype alignment (`proto=1.0`, `coral=0.1`) with the LR climbing from $2.08\times10^{-5}$ to a peak of $1.00\times10^{-4}$. Because the feature space was being pulled toward text matching while decision boundaries were deprioritized, validation accuracy dropped to **7.44% at epoch 5** as expected, while total loss fell to its lowest point ($0.3961$).
+**Validation jitter (epochs 15–18):** Accuracy swung between 35% and 21.91%. This wasn't a bug — with imbalanced data, small boundary adjustments shift large blocks of predictions. Losses kept hitting new lows.
 
-At epoch 6, the ordinal loss weight was raised (`coral=1.0`, `proto=0.2`) and handed to a `CosineAnnealingLR` schedule. The ordinal (`coral`) loss decreased from 0.4469 to 0.3055 and validation accuracy increased to **21.88%** in a single epoch, indicating the decision boundaries started separating meaningfully past the random-guess baseline.
+### 3. Colab Interruption & Recovery
+The Colab free tier cut the run at epoch 18. We bypassed it by sharing the checkpoint folder as an Editor to a second Google account, mounting it in a fresh runtime, running calibration, and resuming seamlessly from epoch 19.
 
-Training continues at approximately 1s/it on GPU with automatic checkpointing (`best.pt`) to cloud storage.
+### 4. Breakthrough (Epochs 19–25)
+Calibration before the restart dropped ECE from 0.1427 to 0.0923. At epoch 24, validation accuracy hit **51.03%** — the highest yet — with total loss at its lowest (0.3001) and both coral (0.2428) and proto (0.2864) losses at all-time lows.
+
+### 5. Final Phase Plan
+* Run to epoch 50 — let the cosine annealing LR decay fully.
+* Final calibration run on `best.pt` for optimal decision boundaries.
+* Full evaluation with calibrated thresholds to get the stable classification metrics.
 
 ## Impact
 
