@@ -109,14 +109,15 @@ class CLIPZeroShotNetwork(nn.Module):
             return self.clip_model.encode_image(images).float()
 
     @torch.no_grad()
-    def predict_grade(self, images):
+    def predict_grade(self, images, thresholds=None):
         self.eval()
         if self.zero_shot_only:
             return self.zero_shot_predict(images)
         proto_logits, projected, ordinal_logits = self.forward(images)
         if self.use_ordinal and ordinal_logits is not None:
             cal_ord = ordinal_logits / self.ordinal_temperature
-            grades = (cal_ord > 0.0).sum(dim=-1)
+            thresh = thresholds.to(device=cal_ord.device) if thresholds is not None else 0.0
+            grades = (cal_ord > thresh).sum(dim=-1)
             cal_proto = proto_logits / self.prototype_temperature
             probs = torch.softmax(cal_proto, dim=-1)
             return grades, probs
