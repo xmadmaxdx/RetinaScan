@@ -116,7 +116,10 @@ class CLIPZeroShotNetwork(nn.Module):
         proto_logits, projected, ordinal_logits = self.forward(images)
         if self.use_ordinal and ordinal_logits is not None:
             cal_ord = ordinal_logits / self.ordinal_temperature
-            thresh = thresholds.to(device=cal_ord.device) if thresholds is not None else 0.0
+            if thresholds is not None:
+                thresh = torch.as_tensor(thresholds, device=cal_ord.device, dtype=cal_ord.dtype)
+            else:
+                thresh = 0.0
             grades = (cal_ord > thresh).sum(dim=-1)
             cal_proto = proto_logits / self.prototype_temperature
             probs = torch.softmax(cal_proto, dim=-1)

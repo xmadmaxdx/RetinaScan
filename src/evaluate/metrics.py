@@ -161,7 +161,14 @@ def evaluate(config, checkpoint_path=None, drive_path=None, tune_thresholds=True
     for images, labels in loader:
         images = images.to(device)
         proto_logits, projected, ordinal_logits = model(images)
-        grades, probs = model.predict_grade(images)
+        if model.use_ordinal and ordinal_logits is not None:
+            cal_ord = ordinal_logits / model.ordinal_temperature
+            grades = (cal_ord > 0.0).sum(dim=-1)
+            cal_proto = proto_logits / model.prototype_temperature
+            probs = torch.softmax(cal_proto, dim=-1)
+        else:
+            grades = proto_logits.argmax(dim=-1)
+            probs = torch.softmax(proto_logits, dim=-1)
         all_preds.extend(grades.cpu().tolist())
         all_labels.extend(labels.tolist())
         all_probs.extend(probs.cpu().tolist())
@@ -183,9 +190,7 @@ def evaluate(config, checkpoint_path=None, drive_path=None, tune_thresholds=True
         tuned_preds = []
         for images, labels in loader:
             images = images.to(device)
-            _, _, ordinal_logits = model(images)
-            cal_ord = ordinal_logits / model.ordinal_temperature
-            grades = (cal_ord > optimal_thresholds.to(device)).sum(dim=-1)
+            grades, _ = model.predict_grade(images, thresholds=optimal_thresholds)
             tuned_preds.extend(grades.cpu().tolist())
         tuned_preds_np = np.array(tuned_preds)
         tuned_acc = accuracy_score(all_labels, tuned_preds_np)
