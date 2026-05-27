@@ -35,23 +35,16 @@ def calibrate(config, checkpoint_path):
     val_ds = build_dataset(config, get_val_transform(config), split="val")
     loader = DataLoader(val_ds, batch_size=config["training"]["batch_size"], shuffle=False, num_workers=2)
 
-    all_ord_logits, all_proto_logits, all_labels = [], [], []
+    all_proto_logits, all_labels = [], []
     with torch.no_grad():
-        for images, labels, *_ in loader:
+        for images, labels in loader:
             images = images.to(device)
-            proto_logits, _, ordinal_logits = model(images)
-            all_ord_logits.append(ordinal_logits.cpu())
+            proto_logits, _, _ = model(images)
             all_proto_logits.append(proto_logits.cpu())
             all_labels.append(labels)
 
-    ord_logits = torch.cat(all_ord_logits)
     proto_logits = torch.cat(all_proto_logits)
     labels = torch.cat(all_labels).to(device)
-
-    targets = torch.stack([
-        (labels >= 1).float(), (labels >= 2).float(),
-        (labels >= 3).float(), (labels >= 4).float(),
-    ], dim=-1)
 
     def best_proto_temp(temps):
         best_ece = float("inf")
@@ -76,6 +69,8 @@ def calibrate(config, checkpoint_path):
     print(f"Optimal prototype temperature: {proto_temp:.4f}")
     print(f"ECE after  calibration:  {ece_after:.4f}")
 
+    model.set_temperatures(ord_temp=ord_temp, proto_temp=proto_temp)
+    ckpt["model_state_dict"] = model.state_dict()
     ckpt["ordinal_temperature"] = ord_temp
     ckpt["prototype_temperature"] = proto_temp
     torch.save(ckpt, checkpoint_path)
