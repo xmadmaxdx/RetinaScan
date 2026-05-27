@@ -5,7 +5,7 @@ import csv
 import yaml
 import argparse
 import torch
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Dataset, Sampler, Subset
 from torchvision import transforms
 from tqdm import tqdm
 import numpy as np
@@ -14,11 +14,12 @@ from src.losses.balanced_loss import ClassWeightedCORALLoss, PrototypeFocalLoss
 
 
 class HuggingFaceEyePACSDataset(Dataset):
-    def __init__(self, hf_dataset_name="bumbledeep/eyepacs", split="train", transform=None):
+    def __init__(self, hf_dataset_name="bumbledeep/eyepacs", split="train", transform=None, heavy_transform=None):
         from datasets import load_dataset
         self.ds = load_dataset(hf_dataset_name, split=split, streaming=False)
         self.labels = self.ds["label_code"]
         self.transform = transform
+        self.heavy_transform = heavy_transform
 
     def __len__(self):
         return len(self.ds)
@@ -27,15 +28,18 @@ class HuggingFaceEyePACSDataset(Dataset):
         row = self.ds[idx]
         img = row["image"].convert("RGB")
         label = row["label_code"]
-        if self.transform:
+        if label >= 3 and self.heavy_transform is not None:
+            img = self.heavy_transform(img)
+        elif self.transform is not None:
             img = self.transform(img)
         return img, label
 
 
 class EyePACSDataset(Dataset):
-    def __init__(self, csv_path, image_dir, transform=None):
+    def __init__(self, csv_path, image_dir, transform=None, heavy_transform=None):
         self.image_dir = image_dir
         self.transform = transform
+        self.heavy_transform = heavy_transform
         self.samples = []
         self._labels = []
         with open(csv_path, newline="") as f:
@@ -43,11 +47,11 @@ class EyePACSDataset(Dataset):
             next(reader, None)
             for row in reader:
                 image_id, label = row[0], int(row[1])
-                self._labels.append(label)
                 for ext in [".jpeg", ".jpg", ".png"]:
                     path = os.path.join(image_dir, image_id + ext)
                     if os.path.exists(path):
                         self.samples.append((path, label))
+                        self._labels.append(label)
                         break
 
     @property
@@ -61,7 +65,9 @@ class EyePACSDataset(Dataset):
         from PIL import Image
         path, label = self.samples[idx]
         img = Image.open(path).convert("RGB")
-        if self.transform:
+        if label >= 3 and self.heavy_transform is not None:
+            img = self.heavy_transform(img)
+        elif self.transform is not None:
             img = self.transform(img)
         return img, label
 
@@ -129,6 +135,22 @@ def get_train_transform(config):
     ])
 
 
+def get_heavy_transform(config):
+    ac = config["augmentation"]
+    return transforms.Compose([
+        transforms.Resize((config["data"]["image_size"], config["data"]["image_size"])),
+        transforms.RandomResizedCrop(ac["random_crop"]),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomVerticalFlip(p=0.3),
+        transforms.RandomAffine(degrees=15, translate=(0.1, 0.1), scale=(0.85, 1.15)),
+        transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.4, hue=0.1),
+        transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 2.0)),
+        transforms.RandomAdjustSharpness(sharpness_factor=2, p=0.3),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+
+
 def get_val_transform(config):
     size = config["data"]["image_size"]
     return transforms.Compose([
@@ -155,11 +177,13 @@ def patient_level_split(dataset, train_ratio=0.8, val_ratio=0.1, seed=42):
     return train_idx, val_idx, test_idx
 
 
-def train_epoch(model, loader, optimizer, loss_coral, loss_proto, device, scaler=None, grad_clip=1.0):
+def train_epoch(model, loader, optimizer, loss_coral, loss_proto, device, epoch=0, scaler=None, grad_clip=1.0):
     model.train()
     total_loss = 0
     coral_loss_sum = 0
     proto_loss_sum = 0
+    cw = 0.1 if epoch < 5 else 1.0
+    pw = 1.0 if epoch < 5 else 0.2
     pbar = tqdm(loader, desc="Train")
     for images, labels in pbar:
         images, labels = images.to(device), labels.to(device)
@@ -175,7 +199,7 @@ def train_epoch(model, loader, optimizer, loss_coral, loss_proto, device, scaler
 
             lc = loss_coral(ordinal_logits, targets)
             lp = loss_proto(projected, text_protos, labels)
-            loss = lc + 0.4 * lp
+            loss = cw * lc + pw * lp
 
         if scaler:
             scaler.scale(loss).backward()
@@ -209,13 +233,13 @@ def validate(model, loader, device):
     return correct / total
 
 
-def build_dataset(config, transform, split="train"):
+def build_dataset(config, transform, split="train", heavy_transform=None):
     source = config["data"].get("source", "local")
     if source == "huggingface":
         hf_name = config["data"]["hf_dataset"]
         hf_split = config["data"].get("hf_split", "train")
         dataset = HuggingFaceEyePACSDataset(
-            hf_dataset_name=hf_name, split=hf_split, transform=transform
+            hf_dataset_name=hf_name, split=hf_split, transform=transform, heavy_transform=heavy_transform
         )
         n = len(dataset)
         rng = np.random.RandomState(42)
@@ -241,7 +265,7 @@ def build_dataset(config, transform, split="train"):
                 return Subset(full_dataset, train_idx)
             return Subset(full_dataset, val_idx)
         else:
-            full_dataset = EyePACSDataset(csv_path, image_dir, transform=transform)
+            full_dataset = EyePACSDataset(csv_path, image_dir, transform=transform, heavy_transform=heavy_transform)
             n = len(full_dataset)
             rng = np.random.RandomState(42)
             indices = rng.permutation(n).tolist()
@@ -288,7 +312,7 @@ def main(config, drive_path=None, resume=False):
     print(f"Data source: {config['data'].get('source', 'local')}")
     mc = config["model"]
 
-    train_ds = build_dataset(config, get_train_transform(config), split="train")
+    train_ds = build_dataset(config, get_train_transform(config), split="train", heavy_transform=get_heavy_transform(config))
     val_ds = build_dataset(config, get_val_transform(config), split="val")
 
     train_labels = [train_ds.dataset.labels[i] for i in train_ds.indices]
@@ -355,7 +379,7 @@ def main(config, drive_path=None, resume=False):
 
     for epoch in range(start_epoch, total_epochs):
         print(f"\nEpoch {epoch+1}/{total_epochs}")
-        train_loss, train_metrics = train_epoch(model, train_loader, optimizer, loss_coral, loss_proto, device, scaler, grad_clip=grad_clip)
+        train_loss, train_metrics = train_epoch(model, train_loader, optimizer, loss_coral, loss_proto, device, epoch=epoch, scaler=scaler, grad_clip=grad_clip)
         val_acc = validate(model, val_loader, device)
         scheduler.step()
         lr = optimizer.param_groups[0]["lr"]
