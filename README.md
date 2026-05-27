@@ -25,8 +25,8 @@ The model fell into a majority-class collapse — because 87% of the data is Gra
 
 **Validation jitter (epochs 15–18):** Accuracy swung between 35% and 21.91%. This wasn't a bug — with imbalanced data, small boundary adjustments shift large blocks of predictions. Losses kept hitting new lows.
 
-### 3. Colab Interruption & Recovery
-The Colab free tier cut the run at epoch 18. We bypassed it by sharing the checkpoint folder as an Editor to a second Google account, mounting it in a fresh runtime, running calibration, and resuming seamlessly from epoch 19.
+### 3. Runtime Interruption & Recovery
+The Colab runtime reached its resource limit at epoch 18. After restoring the checkpoint in a fresh session, we ran calibration to optimise decision boundaries before resuming training from epoch 19.
 
 ### 4. Breakthrough (Epochs 19–25)
 Calibration before the restart dropped ECE from 0.1427 to 0.0923. At epoch 24, validation accuracy hit **51.03%** — the highest yet — with total loss at its lowest (0.3001) and both coral (0.2428) and proto (0.2864) losses at all-time lows.
