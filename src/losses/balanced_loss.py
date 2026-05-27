@@ -4,21 +4,15 @@ import torch.nn.functional as F
 
 
 class ClassWeightedCORALLoss(nn.Module):
-    def __init__(self, class_counts=None):
+    def __init__(self, pos_weight=None):
         super().__init__()
-        if class_counts is not None:
-            counts = torch.FloatTensor(class_counts)
-            total = counts.sum()
-            pos_rates = torch.zeros(4)
-            for k in range(4):
-                pos_rate = counts[k + 1:].sum() / total
-                pos_rates[k] = (1.0 - pos_rate) / (pos_rate + 1e-8)
-            self.register_buffer("task_weights", pos_rates.clamp(1.0, 50.0))
+        if pos_weight is not None:
+            self.register_buffer("pos_weight", torch.tensor(pos_weight))
         else:
-            self.register_buffer("task_weights", torch.tensor([2.7, 4.0, 19.0, 49.0]))
+            self.pos_weight = None
 
     def forward(self, logits, targets):
-        w = self.task_weights.to(device=logits.device)
+        w = self.pos_weight.to(device=logits.device) if self.pos_weight is not None else None
         loss = F.binary_cross_entropy_with_logits(logits, targets, pos_weight=w)
         return loss
 
