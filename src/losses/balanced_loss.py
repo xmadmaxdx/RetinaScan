@@ -18,7 +18,8 @@ class ClassWeightedCORALLoss(nn.Module):
             self.register_buffer("task_weights", torch.tensor([2.7, 4.0, 19.0, 49.0]))
 
     def forward(self, logits, targets):
-        loss = F.binary_cross_entropy_with_logits(logits, targets, pos_weight=self.task_weights)
+        w = self.task_weights.to(device=logits.device)
+        loss = F.binary_cross_entropy_with_logits(logits, targets, pos_weight=w)
         return loss
 
 
