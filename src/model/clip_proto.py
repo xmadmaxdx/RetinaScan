@@ -1,3 +1,4 @@
+import warnings
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -29,15 +30,33 @@ class CLIPZeroShotNetwork(nn.Module):
         mc = config["model"]
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        clip_model, _, _ = open_clip.create_model_and_transforms(
-            mc["backbone"],
-            pretrained=mc["pretrained"],
-            device=self.device,
-        )
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*QuickGELU.*")
+            clip_model, _, _ = open_clip.create_model_and_transforms(
+                mc["backbone"],
+                pretrained=mc["pretrained"],
+                device=self.device,
+            )
         self.clip_model = clip_model
         self.clip_model.eval()
         for p in self.clip_model.parameters():
             p.requires_grad = False
+
+        image_size = config["data"].get("image_size", 224)
+        patch_size = getattr(clip_model.visual, "patch_size", 16)
+        pretrained_pos = clip_model.visual.positional_embedding
+        n_pretrained = pretrained_pos.shape[0]  # 197 for 224x224
+        pretrained_grid = int((n_pretrained - 1) ** 0.5)
+        target_grid = image_size // patch_size
+        if target_grid != pretrained_grid:
+            cls_token = pretrained_pos[0:1]
+            patch_embeds = pretrained_pos[1:]
+            patch_embeds = patch_embeds.reshape(1, pretrained_grid, pretrained_grid, -1)
+            patch_embeds = patch_embeds.permute(0, 3, 1, 2)
+            patch_embeds = F.interpolate(patch_embeds, size=(target_grid, target_grid), mode="bicubic", align_corners=False)
+            patch_embeds = patch_embeds.permute(0, 2, 3, 1).reshape(-1, pretrained_pos.shape[-1])
+            clip_model.visual.positional_embedding = nn.Parameter(torch.cat([cls_token, patch_embeds], dim=0))
+            print(f"  Interpolated positional embeddings: {n_pretrained} → {target_grid**2 + 1} positions")
 
         self.visual_dim = clip_model.visual.output_dim
         self.prototype_dim = mc["prototype_dim"]
@@ -132,7 +151,9 @@ class CLIPZeroShotNetwork(nn.Module):
     def predict_with_uncertainty(self, images_pil, n_runs=20):
         self.train()
         device = self.device
+        tta_size = self.config.get("data", {}).get("image_size", 224)
         tta = T.Compose([
+            T.Resize((tta_size, tta_size)),
             T.RandomHorizontalFlip(p=0.5),
             T.RandomAffine(degrees=5, translate=(0.05, 0.05)),
             T.ColorJitter(brightness=0.1, contrast=0.1),
