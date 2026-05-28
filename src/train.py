@@ -541,7 +541,9 @@ def main(config, drive_path=None, resume=False):
         if os.path.exists(log_dir):
             import shutil
             for f in os.listdir(log_dir):
-                shutil.copy2(os.path.join(log_dir, f), os.path.join(drive_path, f))
+                src = os.path.join(log_dir, f)
+                if os.path.isfile(src):
+                    shutil.copy2(src, os.path.join(drive_path, f))
             print(f"Logs synced to Drive: {drive_path}")
 
     print(f"Done. Best val kappa: {best_kappa:.4f}")
