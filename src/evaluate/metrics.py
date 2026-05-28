@@ -12,6 +12,7 @@ from sklearn.metrics import (
     confusion_matrix, classification_report, precision_recall_fscore_support
 )
 from scipy.stats import spearmanr
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
@@ -137,6 +138,7 @@ def print_ordinal_report(labels, preds):
 def evaluate(config, checkpoint_path=None, drive_path=None, tune_thresholds=True, split="val"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    ckpt = {}
     if checkpoint_path and os.path.exists(checkpoint_path):
         model = CLIPZeroShotNetwork(config, device=device)
         ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
@@ -157,32 +159,56 @@ def evaluate(config, checkpoint_path=None, drive_path=None, tune_thresholds=True
     dataset = get_eval_dataset(config, split=split)
     loader = DataLoader(dataset, batch_size=config["training"]["batch_size"], shuffle=False, num_workers=2)
 
-    all_preds, all_labels, all_probs, all_ord_logits = [], [], [], []
-    for images, labels in loader:
-        images = images.to(device)
-        if model.zero_shot_only:
-            grades, probs = model.predict_grade(images)
-            ordinal_logits = None
-        else:
-            proto_logits, projected, ordinal_logits = model(images)
-            if ordinal_logits is not None:
-                cal_ord = ordinal_logits / model.ordinal_temperature
-                grades = (cal_ord > 0.0).sum(dim=-1)
-                cal_proto = proto_logits / model.prototype_temperature
-                probs = torch.softmax(cal_proto, dim=-1)
-            else:
-                grades = proto_logits.argmax(dim=-1)
-                probs = torch.softmax(proto_logits, dim=-1)
-        all_preds.extend(grades.cpu().tolist())
-        all_labels.extend(labels.tolist())
-        all_probs.extend(probs.cpu().tolist())
-        if not model.zero_shot_only and ordinal_logits is not None:
-            all_ord_logits.append(ordinal_logits.cpu())
+    knn_features = ckpt.get("knn_features") if ckpt else None
+    knn_labels = ckpt.get("knn_labels") if ckpt else None
 
-    labels_np = np.array(all_labels)
-    preds_np = np.array(all_preds)
-    probs_tensor = torch.tensor(all_probs)
-    labels_tensor = torch.tensor(all_labels)
+    if knn_features is not None and knn_labels is not None:
+        print(f"  KNN mode detected: {knn_features.shape[0]} train features")
+        k = 10
+        all_preds, all_labels = [], []
+        for images, labels in tqdm(loader, desc="KNN eval"):
+            images = images.to(device)
+            _, projected, _ = model(images)
+            dist = torch.cdist(projected.cpu(), knn_features.cpu())
+            _, idx = dist.topk(k, largest=False)
+            knn_votes = knn_labels[idx]
+            preds = torch.mode(knn_votes, dim=-1).values
+            all_preds.extend(preds.tolist())
+            all_labels.extend(labels.tolist())
+        labels_np = np.array(all_labels)
+        preds_np = np.array(all_preds)
+        probs_tensor = torch.zeros(len(labels_np), 5)
+        for i, p in enumerate(preds_np):
+            probs_tensor[i, int(p)] = 1.0
+        labels_tensor = torch.tensor(all_labels)
+        tune_thresholds = False
+    else:
+        all_preds, all_labels, all_probs, all_ord_logits = [], [], [], []
+        for images, labels in loader:
+            images = images.to(device)
+            if model.zero_shot_only:
+                grades, probs = model.predict_grade(images)
+                ordinal_logits = None
+            else:
+                proto_logits, projected, ordinal_logits = model(images)
+                if ordinal_logits is not None:
+                    cal_ord = ordinal_logits / model.ordinal_temperature
+                    grades = (cal_ord > 0.0).sum(dim=-1)
+                    cal_proto = proto_logits / model.prototype_temperature
+                    probs = torch.softmax(cal_proto, dim=-1)
+                else:
+                    grades = proto_logits.argmax(dim=-1)
+                    probs = torch.softmax(proto_logits, dim=-1)
+            all_preds.extend(grades.cpu().tolist())
+            all_labels.extend(labels.tolist())
+            all_probs.extend(probs.cpu().tolist())
+            if not model.zero_shot_only and ordinal_logits is not None:
+                all_ord_logits.append(ordinal_logits.cpu())
+
+        labels_np = np.array(all_labels)
+        preds_np = np.array(all_preds)
+        probs_tensor = torch.tensor(all_probs)
+        labels_tensor = torch.tensor(all_labels)
 
     if tune_thresholds and len(all_ord_logits) > 0:
         ord_logits = torch.cat(all_ord_logits)
@@ -207,7 +233,7 @@ def evaluate(config, checkpoint_path=None, drive_path=None, tune_thresholds=True
         torch.save(ckpt, checkpoint_path)
         print(f"Saved optimal thresholds to checkpoint.")
 
-    default_threshold_str = " (default 0.0)" if not tune_thresholds else ""
+    default_threshold_str = " (KNN, no thresholds)" if knn_features is not None else (" (default 0.0)" if not tune_thresholds else "")
     acc = accuracy_score(all_labels, all_preds)
     kappa = cohen_kappa_score(all_labels, all_preds, weights="quadratic")
     f1_macro = f1_score(all_labels, all_preds, average="macro")
