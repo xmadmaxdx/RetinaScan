@@ -72,7 +72,9 @@ def maybe_download_image(image_path):
     print(f"{image_path} not found — downloading sample retina image...")
     import requests
     url = "https://raw.githubusercontent.com/HzFu/EyeQ/master/Examples/0.jpg"
-    os.makedirs(os.path.dirname(image_path), exist_ok=True)
+    d = os.path.dirname(image_path)
+    if d:
+        os.makedirs(d, exist_ok=True)
     r = requests.get(url, timeout=30)
     with open(image_path, "wb") as f:
         f.write(r.content)
