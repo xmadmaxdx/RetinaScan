@@ -58,6 +58,7 @@ class CLIPZeroShotNetwork(nn.Module):
             patch_embeds = F.interpolate(patch_embeds, size=(target_grid, target_grid), mode="bicubic", align_corners=False)
             patch_embeds = patch_embeds.permute(0, 2, 3, 1).reshape(-1, pretrained_pos.shape[-1])
             clip_model.visual.positional_embedding = nn.Parameter(torch.cat([cls_token, patch_embeds], dim=0))
+            clip_model.visual.positional_embedding.requires_grad_(False)
             print(f"  Interpolated positional embeddings: {n_pretrained} → {target_grid**2 + 1} positions")
 
         self.visual_dim = clip_model.visual.output_dim
