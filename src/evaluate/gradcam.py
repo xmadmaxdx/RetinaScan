@@ -16,6 +16,7 @@ from src.model.clip_proto import CLIPZeroShotNetwork
 class GradCAM:
     def __init__(self, model, target_module):
         self.model = model
+        self.target_module = target_module
         self.gradients = None
         self.activations = None
         self._register_hooks(target_module)
@@ -32,12 +33,21 @@ class GradCAM:
         self.gradients = grad
 
     def generate(self, image_tensor, class_idx=None):
+        params = [p for p in self.target_module.parameters() if not p.requires_grad]
+        for p in params:
+            p.requires_grad_(True)
+
+        image_tensor = image_tensor.detach().clone().requires_grad_(True)
+
         logits, _, _ = self.model.forward_gradcam(image_tensor)
         if class_idx is None:
             class_idx = logits.argmax(dim=-1).item()
 
         self.model.zero_grad()
         logits[0, class_idx].backward()
+
+        for p in params:
+            p.requires_grad_(False)
 
         act = self.activations
         if act.dim() == 3:
