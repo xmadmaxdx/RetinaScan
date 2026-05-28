@@ -258,8 +258,8 @@ def train_epoch(model, loader, optimizer, loss_coral, loss_proto, device, epoch=
     total_loss = 0
     coral_loss_sum = 0
     proto_loss_sum = 0
-    cw = 0.1 if epoch < 5 else 1.0
-    pw = 1.0 if epoch < 5 else 0.2
+    cw = 1.0
+    pw = 0.5
     pbar = tqdm(loader, desc="Train")
     for images, labels in pbar:
         images, labels = images.to(device), labels.to(device)
@@ -456,8 +456,8 @@ def main(config, drive_path=None, resume=False):
 
     train_labels = [train_ds.dataset.labels[i] for i in train_ds.indices]
     train_sampler = BalancedStageSampler(train_labels, batch_size=config["training"]["batch_size"])
-    train_loader = DataLoader(train_ds, batch_size=config["training"]["batch_size"], sampler=train_sampler, num_workers=2)
-    val_loader = DataLoader(val_ds, batch_size=config["training"]["batch_size"], shuffle=False, num_workers=2)
+    train_loader = DataLoader(train_ds, batch_size=config["training"]["batch_size"], sampler=train_sampler, num_workers=2, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=config["training"]["batch_size"], shuffle=False, num_workers=2, pin_memory=True)
 
     model = CLIPZeroShotNetwork(config, device=device)
 
