@@ -186,7 +186,7 @@ The last transformer block's attention is backpropagated to produce spatial heat
 
 <img src="outputs/gradcam/gradcam_sample.jpeg" width="500">
 
-*Grad-CAM overlay for a normal retina (Grade 0). The blue uniform activation reflects the absence of lesion features — the model finds no region strongly matching pathology descriptions.*
+*Left: fundus photograph with visible exudates and lesions. Middle: Grad-CAM heatmap — red/orange regions indicate areas driving the prediction. Right: overlay highlighting lesion-affected regions. Predicted Grade 1 (Mild NPDR).*
 
 ---
 
