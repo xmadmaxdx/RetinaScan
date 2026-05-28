@@ -528,6 +528,15 @@ def main(config, drive_path=None, resume=False, tweak=False):
         else:
             print("No checkpoint found for resume — starting from scratch")
 
+    extra = config["training"].get("extra_epochs", 0)
+    if extra > 0:
+        total_epochs = start_epoch + extra
+        print(f"  extra_epochs={extra} -> training until epoch {total_epochs}")
+        current_lr = optimizer.param_groups[0]["lr"]
+        scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=1.0, end_factor=0.1, total_iters=extra
+        )
+
     scaler = torch.amp.GradScaler("cuda", enabled=(config["training"]["mixed_precision"] and torch.cuda.is_available()))
     grad_clip = config["training"].get("gradient_clip", 1.0)
 
@@ -575,5 +584,5 @@ if __name__ == "__main__":
     if args.zero_shot:
         cfg["model"]["zero_shot_only"] = True
     if args.num_epochs is not None:
-        cfg["training"]["epochs"] = args.num_epochs
+        cfg["training"]["extra_epochs"] = args.num_epochs
     main(cfg, drive_path=args.drive_path, resume=args.resume, tweak=args.tweak)
