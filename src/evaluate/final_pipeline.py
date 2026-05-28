@@ -36,7 +36,7 @@ def _load_model(config, checkpoint_path):
     return model, ckpt
 
 
-def _save_final(model, ckpt, source_label, metrics, kappa):
+def _save_final(model, ckpt, source_label, metrics, kappa, knn_features=None, knn_labels=None):
     global BEST_KAPPA_SO_FAR
     if kappa <= BEST_KAPPA_SO_FAR:
         return
@@ -52,6 +52,9 @@ def _save_final(model, ckpt, source_label, metrics, kappa):
         "mae": metrics.get("mae", 0),
         "off_by_one": metrics.get("off_by_one", 0),
     }
+    if knn_features is not None and knn_labels is not None:
+        save_ckpt["knn_features"] = knn_features
+        save_ckpt["knn_labels"] = knn_labels
     if "optimal_thresholds" in ckpt:
         save_ckpt["optimal_thresholds"] = ckpt["optimal_thresholds"]
     torch.save(save_ckpt, FINAL_PATH)
@@ -303,7 +306,7 @@ def knn_evaluate(config, checkpoint_path, k=10):
         "kappa": kappa,
         "mae": np.abs(preds_np - labels_np).mean(),
         "off_by_one": (np.abs(preds_np - labels_np) <= 1).mean(),
-    }
+    }, train_features, train_labels
 
 
 def smoothing_evaluate(config, checkpoint_path):
@@ -319,7 +322,7 @@ def smoothing_evaluate(config, checkpoint_path):
         shuffle=False, num_workers=2
     )
 
-    kernel = torch.tensor([0.05, 0.25, 0.40, 0.25, 0.05], dtype=torch.float32)
+    kernel = torch.tensor([0.05, 0.25, 0.40, 0.25, 0.05], dtype=torch.float32, device=device)
 
     all_preds, all_labels = [], []
     for images, labels in tqdm(loader, desc="Smoothing eval"):
@@ -488,13 +491,19 @@ def final_pipeline(config, checkpoints):
         print(f"  TTA failed: {e}")
         all_results.append((label, {"accuracy": 0, "kappa": 0, "mae": 0, "off_by_one": 0}, False))
 
-    # 6. KNN on best checkpoint (eval-only — not saveable, requires train features at inference)
+    # 6. KNN on best checkpoint
     label = f"KNN (10-NN) on {os.path.basename(checkpoints[0])}"
     try:
-        metrics = knn_evaluate(config, checkpoints[0], k=10)
-        all_results.append((label, metrics, False))
+        metrics, knn_feats, knn_labels = knn_evaluate(config, checkpoints[0], k=10)
+        is_best = metrics["kappa"] > BEST_KAPPA_SO_FAR
+        all_results.append((label, metrics, is_best))
+        if is_best:
+            m, _ = _load_model(config, checkpoints[0])
+            _save_final(m, {}, label, metrics, metrics["kappa"],
+                        knn_features=knn_feats, knn_labels=knn_labels)
         print(f"  {label}: acc={metrics['accuracy']:.4f} kappa={metrics['kappa']:.4f}")
     except Exception as e:
+        import traceback; traceback.print_exc()
         print(f"  KNN failed: {e}")
         all_results.append((label, {"accuracy": 0, "kappa": 0, "mae": 0, "off_by_one": 0}, False))
 
