@@ -4,6 +4,9 @@ from collections import Counter
 GDRBENCH_ROOT = "data/gdrbench/images"
 OUTPUT_CSV    = "data/merged.csv"
 
+os.makedirs(GDRBENCH_ROOT, exist_ok=True)
+os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
+
 LABEL_MAP = {
     "nodr": 0, "mild_npdr": 1,
     "moderate_npdr": 2, "severe_npdr": 3, "pdr": 4

@@ -39,7 +39,7 @@ Download from Google Drive and extract:
 ```bash
 !pip install gdown -q
 !gdown 1ZJOEZ73OdWSG0YbFtgaH8hcE_NGfb8D8 -O gdrbench.zip
-!unzip -q gdrbench.zip -d data/gdrbench/images/
+!mkdir -p data/gdrbench/images && unzip -q gdrbench.zip -d data/gdrbench/images/
 !python merge_datasets.py
 ```
 Expected output: ~108,000 images across all 6 sources.
@@ -119,9 +119,13 @@ Calibrate confidence scores (post-hoc temperature scaling):
 !python src/calibrate.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
 ```
 
-Evaluate trained model:
+Evaluate trained model (val set, also tunes optimal thresholds):
 ```bash
 !python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt --drive-path /content/drive/MyDrive/RetinaScan/logs
+```
+Final test set evaluation (after threshold tuning on val):
+```bash
+!python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt --split test
 ```
 
 Grad-CAM on a sample:
