@@ -23,10 +23,7 @@ class GradCAM:
 
     def _register_hooks(self, module):
         def forward_hook(m, input, output):
-            out = output[0] if isinstance(output, tuple) else output
-            self.activations = out
-            out.register_hook(self._save_gradient)
-
+            self.activations = output[0] if isinstance(output, tuple) else output
         module.register_forward_hook(forward_hook)
 
     def _save_gradient(self, grad):
@@ -40,6 +37,8 @@ class GradCAM:
         image_tensor = image_tensor.detach().clone().requires_grad_(True)
 
         logits, _, _ = self.model.forward_gradcam(image_tensor)
+        self.activations.register_hook(self._save_gradient)
+
         if class_idx is None:
             class_idx = logits.argmax(dim=-1).item()
 
