@@ -63,7 +63,7 @@ class GradCAM:
         weights = grad.mean(dim=(2, 3), keepdim=True)
         cam = (weights * act).sum(dim=1, keepdim=True)
         cam = torch.relu(cam)
-        cam = cam.squeeze().cpu().numpy()
+        cam = cam.detach().squeeze().cpu().numpy()
 
         cam = cv2.resize(cam, (image_tensor.shape[2], image_tensor.shape[3]))
         cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
