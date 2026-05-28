@@ -42,6 +42,7 @@ def export_to_onnx(config, checkpoint_path=None, output_path="deploy/model.onnx"
         },
         opset_version=opset_version,
         do_constant_folding=True,
+        dynamo=False,
     )
 
     onnx_model = onnx.load(output_path)
@@ -71,7 +72,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", default="configs/train_config.yaml")
     parser.add_argument("--checkpoint", default=None)
     parser.add_argument("--output", default="deploy/model.onnx")
-    parser.add_argument("--opset", type=int, default=17)
+    parser.add_argument("--opset", type=int, default=18)
     args = parser.parse_args()
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
