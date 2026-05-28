@@ -1,164 +1,148 @@
 # RetinaScan — Colab Terminal Setup Guide
 
 ## Prerequisites
-Open a **Colab** notebook → Runtime → Change runtime type → **T4 GPU**.
+Colab notebook → Runtime → Change runtime type → **T4 GPU**.
 
 ---
 
-## Step-by-step Installation (paste in order)
+## Installation
 
-### 1. Mount Google Drive & check GPU
+### 1. Mount Drive & Check GPU
 ```python
 from google.colab import drive
 drive.mount('/content/drive')
 !nvidia-smi
 ```
 
-### 2. Clone the repo
+### 2. Clone Repo
 ```bash
 !git clone https://github.com/xmadmaxdx/RetinaScan.git
 %cd RetinaScan
 ```
 
-### 3. Install core ML libraries
+### 3. Install Dependencies
 ```bash
 !pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 !pip install open-clip-torch==2.24.0
-!pip install "numpy<2.0.0"  # wandb/timm compat with numpy 1.x
+!pip install "numpy<2.0.0"
+!pip install opencv-python==4.9.0.80 scikit-image==0.23.2 Pillow==10.3.0
+!pip install tqdm pyyaml scikit-learn matplotlib seaborn gdown
+!pip install onnx onnxruntime-gpu onnxscript
 ```
 
-### 4. Install image processing
+### 4. Download GDRBench Merged Data
 ```bash
-!pip install opencv-python==4.9.0.80
-!pip install scikit-image==0.23.2
-!pip install Pillow==10.3.0
-```
-
-### 5a. [Primary] Download GDRBench merged pack (~10 GB, 6 datasets)
-Download from Google Drive and extract:
-```bash
-!pip install gdown -q
 !gdown 1ZJOEZ73OdWSG0YbFtgaH8hcE_NGfb8D8 -O gdrbench.zip
 !mkdir -p data/gdrbench/images && unzip -qo gdrbench.zip -d data/gdrbench/images/
 !python merge_datasets.py
 ```
-Expected output: ~108,000 images across all 6 sources.
 
-### 5b. [Legacy] Single-dataset EyePACS only (HuggingFace, no auth)
-```python
-!pip install datasets -q
-from datasets import load_dataset
-ds = load_dataset("bumbledeep/eyepacs", split="train")
-print(f"Loaded {len(ds)} images — already cropped and resized")
-# Then switch config back: data.source = huggingface in train_config.yaml
-```
-
-### 6. Install training & evaluation utilities
+### 5. Verify
 ```bash
-!pip install tqdm==4.66.2
-!pip install wandb==0.17.0
-!pip install pyyaml==6.2
-!pip install scikit-learn==1.4.2
-!pip install matplotlib==3.8.4
-!pip install seaborn==0.13.2
-```
-
-### 7. Install deployment tools
-```bash
-!pip install onnx==1.16.0
-!pip install onnxruntime-gpu==1.17.1
-!pip install onnxscript
-```
-
-### 8. Verify everything
-```bash
-!python -c "import torch; import open_clip; import cv2; print('All imports OK. Torch:', torch.__version__)"
+!python -c "import torch; import open_clip; import cv2; print('OK', torch.__version__)"
 ```
 
 ---
 
-## Choose Your Data Source
-
-The config defaults to `source: merged` (GDRBench, 6 datasets, ~108k images).
-To use **EyePACS only** (HuggingFace), edit `configs/train_config.yaml` and change:
-```yaml
-data:
-  source: "huggingface"            # was "merged"
-  hf_dataset: "bumbledeep/eyepacs"
+## Pull Latest Code (after updates)
+```bash
+%cd RetinaScan
+!git pull
 ```
-
-Both code paths are fully supported — switch back any time.
 
 ---
 
-## Run the Pipeline
+## Training
 
-### Option A: Pure Zero-Shot (no training needed)
+### Fresh Training (50 epochs, ~6h)
 ```bash
-# Evaluate zero-shot — CLIP text vs image similarity
-# Ensure data is available first (Step 5a for merged, or 5b + config switch for HF)
-!python src/evaluate/metrics.py --config configs/train_config.yaml
-```
-
-### Option B: Train Projection Head (better accuracy)
-
-Mount Drive first:
-```python
-from google.colab import drive
-drive.mount('/content/drive')
-```
-
-Train (~2.5h for 50 epochs on T4):
-```bash
-# batch_size must be divisible by 5 (set to 40 in config for balanced batches)
 !python src/train.py --config configs/train_config.yaml --drive-path /content/drive/MyDrive/RetinaScan/checkpoints
 ```
 
-Calibrate confidence scores (post-hoc temperature scaling):
-```bash
-!python src/calibrate.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
-```
-
-Evaluate trained model (val set, also tunes optimal thresholds):
-```bash
-!python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt --drive-path /content/drive/MyDrive/RetinaScan/logs
-```
-Final test set evaluation (after threshold tuning on val):
-```bash
-!python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt --split test
-```
-
-Grad-CAM on a sample:
-```bash
-!python src/evaluate/gradcam.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt --image data/raw/sample.jpeg
-```
-
-Export ONNX:
-```bash
-!python deploy/export_onnx.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
-```
-
-**Resume after crash/disconnect:**
+### Resume After Crash
+Sync checkpoint from Drive, then resume:
 ```bash
 !cp /content/drive/MyDrive/RetinaScan/checkpoints/latest.pt checkpoints/latest.pt
 !python src/train.py --config configs/train_config.yaml --drive-path /content/drive/MyDrive/RetinaScan/checkpoints --resume
 ```
 
+### Tweak Run (Rebalance + Extra Epochs)
+After initial training completes, improve minority recall with rebalanced CORAL loss:
+```bash
+!cp /content/drive/MyDrive/RetinaScan/checkpoints/latest.pt checkpoints/latest.pt
+!python src/train.py --config configs/train_config.yaml --drive-path /content/drive/MyDrive/RetinaScan/checkpoints --resume --tweak --num-epochs 5
+```
+- `--tweak` enables per-task pos_weight for ordinal loss (sqrt of class ratios)
+- `--num-epochs N` trains N additional epochs from current point
+
 ---
 
-## Download Artifacts to Drive
+## Evaluation
+
+### Full Evaluation Report (Val)
 ```bash
-!cp -r checkpoints /content/drive/MyDrive/RetinaScan/
-!cp -r logs /content/drive/MyDrive/RetinaScan/
-!cp deploy/*.onnx /content/drive/MyDrive/RetinaScan/
+!python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/final.pt --split val
+```
+Auto-detects KNN mode if checkpoint contains training features.
+
+### Test Set (Unseen Holdout)
+```bash
+!python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/final.pt --split test
+```
+
+### With Threshold Tuning
+```bash
+!python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt --split val
+```
+Adds tuned threshold metrics with confusion matrix plots.
+
+---
+
+## Calibration
+
+```bash
+!python src/calibrate.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
+```
+Searches ordinal temperature (maximizes kappa) + prototype temperature (minimizes ECE).
+
+---
+
+## Final Pipeline (Multi-Mode Comparison)
+
+Compare all inference strategies and pick the best:
+```bash
+!python src/evaluate/final_pipeline.py --config configs/train_config.yaml --checkpoints checkpoints/best.pt
+```
+Runs: baseline, calibrated+tuned, SWA, ensemble, KNN. Auto-saves `checkpoints/final.pt` if kappa improves.
+
+With multiple checkpoints:
+```bash
+!python src/evaluate/final_pipeline.py --config configs/train_config.yaml --checkpoints checkpoints/best.pt checkpoints/latest.pt
 ```
 
 ---
 
-## Hugging Face Spaces Quick Deploy
+## Other Tools
+
+### Grad-CAM Heatmap
 ```bash
-# After training, create a Space:
-# 1. huggingface.co → New Space → Gradio SDK → free tier
-# 2. Upload: app.py, requirements.txt, checkpoints/best.pt
-# 3. HF auto-deploys. Set UptimeRobot to ping every 5 min.
+!python src/evaluate/gradcam.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt --image sample.jpeg
+```
+
+### Export ONNX
+```bash
+!python deploy/export_onnx.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
+```
+
+### Zero-Shot Evaluation (No Training)
+```bash
+!python src/evaluate/metrics.py --config configs/train_config.yaml
+```
+
+---
+
+## Sync Artifacts to Drive
+```bash
+!cp -r checkpoints /content/drive/MyDrive/RetinaScan/
+!cp -r logs /content/drive/MyDrive/RetinaScan/
 ```

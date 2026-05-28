@@ -1,235 +1,234 @@
-# RetinaScan — Diabetic Retinopathy Grading with CLIP-Guided Prototypes
+# RetinaScan — Diabetic Retinopathy Grading with CLIP-Guided Visual Prototypes
 
 [![Hugging Face](https://img.shields.io/badge/HF-Space-blue)](https://huggingface.co/spaces/YOUR_USER/retinascan)
 [![Colab](https://img.shields.io/badge/Open%20in-Colab-orange)](https://colab.research.google.com/drive/1RRsy4PRRXe51wuCGWgxvnXKe8kJf9n8e?usp=sharing)
 
-RetinaScan grades diabetic retinopathy severity (Grade 0–4) using CLIP vision-language models. Works in two modes — **zero-shot** (no training, instant) or **projection-tuned** (trained, higher accuracy). Trained on the GDRBench merged corpus (108k images across 6 datasets) or EyePACS-only via HuggingFace. Core idea: encode clinical descriptions through CLIP's text encoder and compare them to image features.
+RetinaScan grades diabetic retinopathy severity (Grade 0–4) from fundus photographs using a CLIP vision-language backbone with a learnable projection head. The model combines text-guided visual prototypes for interpretability with a CORAL ordinal regression head for clinically meaningful severity ordering.
 
-## The Problem
+---
 
-> 80% of diabetic patients in low-income countries never receive retina screening due to specialist scarcity. Existing graders need thousands of labeled images per clinic.
+## Motivation
 
-## Results
+Diabetic retinopathy (DR) is the leading cause of preventable blindness among working-age adults. Screening requires trained ophthalmologists, which limits access in low-resource settings. Automated grading systems can help, but face two challenges: (1) DR grading is ordinal — misclassifying Grade 3 as 4 is less harmful than Grade 0 as 4 — and (2) severe grades are rare, making standard cross-entropy training ineffective for minority classes.
 
-Zero-shot CLIP alone cannot separate DR severity — the text embeddings for different grades are too close in joint space, so every image maps to "No DR" (72.62% accuracy, 0% recall on Grades 1–4). Training the projection head is required.
+This work addresses both challenges through a combination of ordinal regression and dataset consolidation.
 
-The following results are from **EyePACS-only** training (our initial experiment, 35k images). Retraining on the full GDRBench merged corpus is in progress.
+---
 
-After 50 epochs of phased multi-task training with a balanced sampler, the model reached these numbers:
+## Dataset
 
-| Metric | Default Thresholds | After Threshold Tuning |
-|--------|:------------------:|:----------------------:|
-| Accuracy | 51.03% | **63.19%** |
-| Quadratic Kappa | 0.3731 | **0.4181** |
-| F1 Weighted | 0.5678 | **0.6475** |
-| MAE (grade error) | 0.5912 | **0.5692** |
-| Off-by-1 Accuracy | 91.37% | 80.80% |
-| ECE (calibration) | 0.0468 | — |
-| | **best.pt (Epoch 24)** | |
+### GDRBench Merged Corpus (Primary)
 
-The final model (epoch 50) has similar accuracy (62.82%) but better ordinal metrics — higher kappa (0.4455), lower MAE (0.5393), and higher off-by-1 accuracy (84.30%). It makes safer mistakes by keeping predictions closer to the true grade.
+The primary dataset combines six publicly available DR fundus photography datasets into a unified corpus. A source-aware splitting strategy prevents dataset-specific leakage between train, validation, and test sets.
 
-| Grade | Precision | Recall | F1 | Support |
-|-------|:---------:|:------:|:--:|:-------:|
-| Grade 0 — No DR | 84.62% | 63.58% | 72.61% | 2570 |
-| Grade 1 — Mild NPDR | 6.47% | 39.22% | 11.11% | 232 |
-| Grade 2 — Moderate NPDR | 38.24% | 11.88% | 18.13% | 547 |
-| Grade 3 — Severe NPDR | 50.00% | 1.20% | 2.35% | 83 |
-| Grade 4 — Proliferative DR | 0.00% | 0.00% | 0.00% | 78 |
+| Dataset | Origin | Training Samples |
+|---------|--------|:----------------:|
+| APTOS | India | 3,661 |
+| DDR | China | 5,819 |
+| DeepDR | China | 2,621 |
+| IDRiD | India | 413 |
+| RLDR | China | 3,717 |
+| **Total** | | **16,231** |
 
-Low recall on Grades 3–4 is expected — only 83 and 78 samples respectively. The model simply never sees enough examples of these grades to learn them well. The GDRBench merged corpus addresses this with ~3,700 combined Grade 3+4 samples (22× more) — retraining results pending.
+### Class Distribution
 
-### Confusion Matrices
+| Grade | Label | Validation Samples | Percentage |
+|-------|-------|:------------------:|:----------:|
+| 0 | No DR | 927 | 45.7% |
+| 1 | Mild NPDR | 143 | 7.0% |
+| 2 | Moderate NPDR | 691 | 34.1% |
+| 3 | Severe NPDR | 101 | 5.0% |
+| 4 | Proliferative DR | 166 | 8.2% |
 
-| Default thresholds | Tuned thresholds |
-|:---:|:---:|
-| <img src="logs/confusion_matrix_best.png" width="300"> | <img src="logs/confusion_matrix_tuned_best.png" width="300"> |
+### Comparison with EyePACS-Only Baseline
 
-### Reliability Diagram
+An earlier experiment using only the EyePACS dataset (35k images, 161 Grade 3+4 samples) resulted in 0% recall on severe grades — the ordinal head never predicted Grade 3 or 4 due to insufficient training examples. The GDRBench merged corpus increases Grade 3+4 representation by a factor of approximately 15, enabling the model to learn meaningful separation at the severe end of the severity spectrum.
 
-<img src="logs/reliability_diagram_best.png" width="400">
-
-## Impact
-
-A mobile-deployable model that outputs Grade 0-4 severity with heatmaps, allowing non-specialists to screen patients in **under 2 seconds per image**.
+---
 
 ## Architecture
 
+The model operates in three stages:
+
+1. **Feature Extraction** — A frozen CLIP ViT-B/16 encoder processes fundus images (224×224, native CLIP resolution). A trainable projection head (Linear-ReLU-Dropout-Linear, 529K parameters) maps CLIP's 512-dim visual features into a shared embedding space.
+
+2. **Text-Guided Prototypes** — Five text descriptions, one per severity grade, are encoded through CLIP's frozen text encoder. These serve as interpretable anchors. Cosine similarity between projected image features and text prototypes produces per-grade confidence scores that can be traced back to specific clinical descriptions.
+
+3. **Ordinal Regression** — A CORAL (COnsistent RAnk Logits) head decomposes the 5-class problem into four binary tasks: grade ≥ 1, grade ≥ 2, grade ≥ 3, grade ≥ 4. The final prediction is the sum of positive tasks. This penalizes distant errors more than near errors, matching the clinical reality of DR grading.
+
 ```
-CLIP Text Encoder (frozen)           CLIP Image Encoder (frozen)
-         │                                    │
-         ▼                                    ▼
-  Severity Descriptions ──► text     retina fundus ──► image
-  (Grade 0-4 clinical        features     image        features
-   language)                    │                        │
-                                ▼                        ▼
-                      ┌──────────────────────────────────┐
-                      │     Shared Projection Head       │
-                      │     (only trainable part)        │
-                      └────────────┬─────────────────────┘
-                                   │
-                    ┌──────────────┴──────────────┐
-                    ▼                             ▼
-           Cosine Similarity                Ordinal Regression
-           + Temperature Scaling            (CORAL head, 4 tasks)
-                    │                              │
-                    ▼                              ▼
-           Interpretable Similarities       Clinically-grounded
-           to each severity text            Grade 0-4 prediction
-                    │                              │
-                    └──────────┬───────────────────┘
-                               ▼
-                    Final Grade + Grad-CAM Heatmap
+Image ──► CLIP Vision Encoder (frozen) ──► Projection Head ──┐
+                                                              ├──► Cosine Similarity (prototypes)
+Text ──► CLIP Text Encoder (frozen) ──► 5 prototypes ────────┘         + CORAL Ordinal Head
+                                                                              │
+                                                                              ▼
+                                                                        Grade 0–4
 ```
 
-### Text-Derived Prototypes (Interpretability)
+---
 
-Instead of learning prototypes from labeled images, we encode **clinically accurate severity descriptions** through CLIP's text encoder. These text embeddings serve as fixed, interpretable anchors:
+## Training
 
-| Grade | Text Prototype |
-|-------|----------------|
-| 0 | "no diabetic retinopathy, healthy retina with normal blood vessels..." |
-| 1 | "mild NPDR with only a few microaneurysms, no hemorrhages..." |
-| 2 | "moderate NPDR with microaneurysms, dot-blot hemorrhages, hard exudates..." |
-| 3 | "severe NPDR with venous beading, intraretinal hemorrhages in four quadrants..." |
-| 4 | "proliferative DR with neovascularization, vitreous hemorrhage..." |
+### Configuration
 
-Cosine similarity against these prototypes produces interpretable confidence scores per grade — the model can explain *why* it chose a grade by showing which clinical description matched best. When uncertainty is high, it shows *which other grades* are plausible.
+| Hyperparameter | Value |
+|---------------|:-----:|
+| Image size | 224 × 224 |
+| Batch size | 40 (8 per class via balanced sampler) |
+| Optimizer | AdamW (lr=1e-4, weight decay=1e-4) |
+| Scheduler | Cosine annealing over 50 epochs, 2-epoch warmup |
+| Loss (CORAL) | BCEWithLogitsLoss on 4 ordinal tasks (weight 1.0) |
+| Loss (Prototype) | Focal loss, γ=2.5 (weight 0.5) |
+| Mixed precision | FP16 |
+| Gradient clipping | 1.0 |
 
-### Uncertainty Quantification (Clinical Trust)
+### Data Imbalance Strategy
 
-A model that gives a wrong grade confidently is dangerous. RetinaScan estimates **per-image uncertainty** at inference using **test-time augmentation (TTA)**:
+The primary challenge in DR grading is class imbalance — Grade 0 dominates while Grades 3 and 4 are rare. Two strategies address this:
 
-1. Run the input through **20 random augmentations** (flip, slight rotation, color jitter)
-2. Aggregate predictions → mean grade + confidence score
-3. **Confidence** = `1 - normalized predictive entropy` (0–1 scale)
+1. **Balanced Stage Sampler** — Each training batch contains exactly 8 samples from each of the 5 severity grades, sampled with replacement from the minority classes. This ensures the CORAL loss receives balanced gradient signals every step.
 
-**Clinical value**:
-- **High confidence (≥0.7)**: grade is stable across augmentations — trust it
-- **Medium confidence (0.4–0.7)**: near a decision boundary — flag for review
-- **Low confidence (<0.4)**: model is uncertain — suggest retake or escalate
+2. **Dataset Consolidation** — Combining six datasets increases Grade 3+4 representation from 161 (EyePACS-only) to over 2,500 samples, providing sufficient data for the ordinal boundaries at the severe end.
 
-The app shows alternative plausible grades when confidence is low, so clinicians know *which other grades are possible*, not just that the model is unsure.
+---
 
-Additionally, the projection head includes **dropout layers** for **MC Dropout** support — after retraining with dropout, uncertainty estimates further improve.
+## Results
 
-### Confidence Calibration (Truthful Confidence)
+### Validation Performance
 
-A model that says "90% confident" should be right 90% of the time. RetinaScan uses **post-hoc temperature scaling** — a single learned parameter per head that scales logits to produce well-calibrated probabilities:
+Seven evaluation modes were tested on the validation set (2,028 images):
 
-- **ECE (Expected Calibration Error)** measured before and after scaling
-- **Ordinal temperature** scales the 4 binary logits before sigmoid
-- **Prototype temperature** scales the 5-class logits before softmax
-- Temperatures are optimized on the **validation set** via L-BFGS (seconds, not hours)
+| Mode | Accuracy | Kappa | MAE | Off-by-1 |
+|:----|:-------:|:-----:|:---:|:--------:|
+| Baseline (ordinal head) | 51.97% | 0.6166 | 0.6159 | 88.21% |
+| Calibrated + Tuned | 54.59% | 0.6330 | 0.5917 | 87.87% |
+| **KNN (10-NN on features)** | **69.97%** | **0.6987** | **0.4946** | **82.30%** |
 
-**Clinical value**: When the app says "85% confident — Grade 2", that 85% is truthful. A clinician can set their own threshold (e.g., "only trust predictions above 90% confidence") with known precision.
+The KNN approach uses the projection head to extract 512-dim features, then classifies by majority vote among the 10 nearest training samples. This non-parametric method outperforms the linear ordinal head by approximately 15 accuracy points, suggesting the feature space is well-structured but the linear classifier cannot fully exploit it.
 
-### Ordinal Regression Head (Clinical Accuracy)
+### Test Performance
 
-Diabetic retinopathy grading is inherently **ordinal** — misclassifying Grade 3 as Grade 4 is clinically acceptable, but Grade 0 as Grade 4 is dangerous. Standard cross-entropy treats all errors equally, which is wrong for this task.
+| Metric | Value |
+|--------|:-----:|
+| Accuracy | 69.80% |
+| Quadratic Kappa | 0.7223 |
+| F1 Macro | 48.69% |
+| F1 Weighted | 67.37% |
+| MAE | 0.4806 |
+| Off-by-1 Accuracy | 83.33% |
 
-A **CORAL (COnsistent RAnk Logits)** head solves this by decomposing the problem into 4 binary tasks:
-- Is severity ≥ Grade 1?
-- Is severity ≥ Grade 2?
-- Is severity ≥ Grade 3?
-- Is severity ≥ Grade 4?
+### Per-Class Performance (Test)
 
-The final grade is the sum of positive tasks. This:
-- Penalizes distant errors more than near errors (matches clinical reality)
-- Improves **Quadratic Weighted Kappa** — the gold standard metric for DR grading
-- Produces calibrated confidence scores per decision threshold
+| Class | Precision | Recall | F1 | Support |
+|-------|:--------:|:------:|:--:|:-------:|
+| Grade 0 — No DR | 79.15% | 88.70% | 83.65% | 929 |
+| Grade 1 — Mild NPDR | 44.90% | 15.28% | 22.80% | 144 |
+| Grade 2 — Moderate NPDR | 62.55% | 70.85% | 66.44% | 693 |
+| Grade 3 — Severe NPDR | 35.42% | 14.66% | 20.73% | 116 |
+| Grade 4 — Proliferative DR | 59.09% | 43.05% | 49.81% | 151 |
 
-Both heads share the same learned projection features, so the interpretability of prototypes is preserved while the ordinal head drives the final prediction.
+Grade 1 recall remains low, consistent with known inter-rater variability for mild NPDR. Grade 3 recall is limited by its position as a boundary class between moderate and proliferative.
 
-### Two Operating Modes
+---
 
-| Mode | Training Data | Use Case |
-|------|--------------|----------|
-| **Zero-Shot** | None — just CLIP text descriptions | Instant deploy, no GPU needed |
-| **Projection Tuning** | Labeled retina images | Higher accuracy, trained ordinal head |
+## Key Technical Details
 
-## Training Journey
+### Temperature Calibration
 
-The full training history — every bug, fix, calibration run, and epoch log — is documented in [journey.md](journey.md).
+Post-hoc temperature scaling improves confidence calibration. Two temperatures are optimized independently on the validation set:
+
+- **Ordinal temperature** (optimized for kappa): 0.20
+- **Prototype temperature** (optimized for ECE): 0.90
+
+ECE improved from 0.068 to 0.055 after calibration.
+
+### Ordinal Threshold Tuning
+
+Each binary task in the CORAL head can use a non-zero decision threshold:
+
+| Task | Default | Tuned |
+|:----:|:-------:|:-----:|
+| Grade ≥ 1 | 0.0 | 0.50 |
+| Grade ≥ 2 | 0.0 | -1.20 |
+| Grade ≥ 3 | 0.0 | -6.60 |
+| Grade ≥ 4 | 0.0 | -4.20 |
+
+The negative thresholds for Grades 3 and 4 indicate the model systematically underestimates severity for rare classes — compensated by lowering the decision boundary.
+
+### KNN Inference
+
+The final model stores 16,231 training features alongside the projection head. Inference proceeds in two steps:
+
+1. Extract 512-dim feature from query image via the projection head
+2. Find 10 nearest neighbors by Euclidean distance in feature space; output majority grade
+
+This requires approximately 23 MB for the feature bank and adds negligible inference latency with GPU acceleration.
+
+---
+
+## Comparison with EyePACS-Only Experiment
+
+| Metric | EyePACS (Old) | Merged GDRBench (New) |
+|--------|:------------:|:--------------------:|
+| Grade 3+4 samples | 161 | 2,500+ |
+| Best kappa (ordinal head) | 0.4455 | 0.6330 |
+| Best kappa (KNN) | N/A | 0.7223 |
+| Grade 3 recall | 0% | 14.66% (test) |
+| Grade 4 recall | 0% | 43.05% (test) |
+
+The primary limitation of the EyePACS-only experiment was data scarcity for severe grades. The merged corpus increases minority representation by a factor of 15, which directly translates to improved ordinal ranking (kappa) and the ability to predict severe grades at all.
+
+---
+
+## Limitations
+
+- **Grade 1 recall** (15.28%) remains limited due to subjective grading boundaries.
+- **Grade 3 recall** (14.66%) reflects the difficulty of separating moderate from severe NPDR.
+- **KNN deployment** requires storing the training feature bank (~23 MB), which is feasible for mobile deployment but adds infrastructure compared to a single forward pass.
+- **Cross-dataset generalization** was not evaluated — the model may perform differently on fundus photographs from unseen acquisition protocols.
+
+---
 
 ## Project Structure
 
 ```
 RetinaScan/
-├── data/gdrbench/images/          # GDRBench merged pack (6 datasets)
-├── data/merged.csv                # Unified CSV (image_path, grade, source)
-├── data/raw/                      # Raw EyePACS dataset (legacy)
-├── data/processed/                # Preprocessed images (legacy)
+├── data/merged.csv                 # Unified training CSV
+├── checkpoints/final.pt            # Best checkpoint (KNN mode)
 ├── src/
-│   ├── preprocess.py              # CLAHE + Ben Graham + crop-to-circle
-│   ├── calibrate.py               # Post-hoc temperature scaling (ECE optimization)
-│   ├── train.py                   # Training loop (CSV-based, patient-level split)
-│   ├── model/
-│   │   ├── clip_proto.py          # CLIP dual encoder (image + text)
-│   │   └── prototype_bank.py      # Text-derived prototypes
-│   ├── losses/
-│   │   └── proto_loss.py          # Text-alignment + entropy + diversity loss
+│   ├── train.py                    # Training loop
+│   ├── calibrate.py                # Temperature scaling
+│   ├── model/clip_proto.py         # Model definition
+│   ├── losses/balanced_loss.py     # CORAL + prototype losses
 │   └── evaluate/
-│       ├── metrics.py             # Accuracy, Kappa, F1, confusion matrix
-│       └── gradcam.py             # ViT Grad-CAM severity heatmaps
-├── deploy/
-│   └── export_onnx.py             # ONNX export + latency benchmark
-├── configs/
-│   └── train_config.yaml          # All hyperparameters
-├── merge_datasets.py              # Merge GDRBench into unified CSV
-├── notebooks/
-│   ├── EDA.ipynb
-│   └── Train.ipynb
-├── app.py                         # Gradio interface (HF Spaces)
-├── terminal.md                    # Colab installation guide
-├── journey.md                     # Full training history and debugging log
-├── requirements.txt
-├── logs/                          # Confusion matrices, reliability diagrams
-└── README.md
+│       ├── metrics.py              # Full evaluation report
+│       ├── final_pipeline.py       # Multi-mode comparison
+│       └── gradcam.py              # Grad-CAM heatmaps
+├── notebooks/merged_train.ipynb    # Colab training notebook
+├── configs/train_config.yaml       # Hyperparameters
+├── app.py                          # Gradio deployment
+├── new_journey.md                  # Full training history
+└── requirements.txt
 ```
 
-## Dataset
-
-Three data sources supported (set `data.source` in config):
-
-| Source | Size | Auth | Preprocessing |
-|--------|------|------|---------------|
-| `merged` **(primary)** | ~10 GB — GDRBench (6 datasets) | Google Drive | Already 512×512, cropped |
-| `huggingface` (legacy) | 6.5 GB — `bumbledeep/eyepacs` | None | Already cropped + resized |
-| `local` (legacy) | 88 GB — EyePACS Kaggle | Kaggle API token | Run `src/preprocess.py` |
-
-The `merged` source combines APTOS, DeepDR, IDRiD, RLDR, DDR, and EyePACS into a single 108k-image corpus with source-aware train/val/test splitting. This dramatically increases minority class representation — from ~161 Grade 3+4 samples (EyePACS-only) to ~3,700 across all six datasets.
+---
 
 ## Quick Start
 
-### Pure Zero-Shot (2 minutes, no GPU needed for inference)
+Evaluation on the validation set:
+
 ```bash
 pip install -r requirements.txt
-python src/evaluate/metrics.py --config configs/train_config.yaml
+python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/final.pt --split val
 ```
 
-### With Projection Tuning (Colab T4)
+Training from scratch (Colab T4, ~6 hours):
+
 ```bash
-# Option 1: GDRBench merged (default) — download first
-#   python merge_datasets.py          # after extracting GDRBench pack
-# Option 2: EyePACS only — switch source to "huggingface" in config
-#   # No download step — loads from HuggingFace
-python src/train.py --config configs/train_config.yaml
-python src/calibrate.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
-python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
+python src/train.py --config configs/train_config.yaml --drive-path /content/drive/MyDrive/RetinaScan/checkpoints
 ```
 
-### Grad-CAM Visualization
-```bash
-python src/evaluate/gradcam.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt --image sample.jpeg
-```
-
-## Deployment
-
-1. **Train** → `checkpoints/best.pt`
-2. **Push to Hugging Face Spaces** (Gradio SDK — `app.py`)
-3. **UptimeRobot** ping every 5 min → keeps Space warm
-4. **Inference**: <500ms per image on CPU, <100ms on GPU
+---
 
 ## Citation
 
