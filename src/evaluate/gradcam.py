@@ -22,12 +22,14 @@ class GradCAM:
 
     def _register_hooks(self, module):
         def forward_hook(m, input, output):
-            self.activations = output[0] if isinstance(output, tuple) else output
-        def backward_hook(m, grad_input, grad_output):
-            self.gradients = grad_output[0]
+            out = output[0] if isinstance(output, tuple) else output
+            self.activations = out
+            out.register_hook(self._save_gradient)
 
         module.register_forward_hook(forward_hook)
-        module.register_full_backward_hook(backward_hook)
+
+    def _save_gradient(self, grad):
+        self.gradients = grad
 
     def generate(self, image_tensor, class_idx=None):
         logits, _, _ = self.model.forward_gradcam(image_tensor)
