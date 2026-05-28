@@ -2,6 +2,7 @@ import sys, os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import csv
+from collections import defaultdict
 import yaml
 import argparse
 import torch
@@ -73,8 +74,8 @@ class EyePACSDataset(Dataset):
 
 
 class EyePACSWithPatientID(EyePACSDataset):
-    def __init__(self, csv_path, image_dir, transform=None):
-        super().__init__(csv_path, image_dir, transform)
+    def __init__(self, csv_path, image_dir, transform=None, heavy_transform=None):
+        super().__init__(csv_path, image_dir, transform, heavy_transform)
         self.patient_ids = []
         with open(csv_path, newline="") as f:
             reader = csv.reader(f)
@@ -87,6 +88,49 @@ class EyePACSWithPatientID(EyePACSDataset):
         return img, label, self.patient_ids[idx]
 
 
+class MergedDataset(Dataset):
+    def __init__(self, csv_path, transform=None, heavy_transform=None):
+        self.transform = transform
+        self.heavy_transform = heavy_transform
+        self.samples = []
+        self._labels = []
+        self._sources = []
+        self._source_set = set()
+        with open(csv_path, newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                self.samples.append((row["image_path"], int(row["grade"])))
+                self._labels.append(int(row["grade"]))
+                src = row.get("source", "unknown")
+                self._sources.append(src)
+                self._source_set.add(src)
+
+    @property
+    def labels(self):
+        return self._labels
+
+    @property
+    def sources(self):
+        return self._sources
+
+    @property
+    def source_set(self):
+        return self._source_set
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        from PIL import Image
+        path, label = self.samples[idx]
+        img = Image.open(path).convert("RGB")
+        if label >= 3 and self.heavy_transform is not None:
+            img = self.heavy_transform(img)
+        elif self.transform is not None:
+            img = self.transform(img)
+        return img, label
+
+
 class BalancedStageSampler(Sampler):
     def __init__(self, labels, batch_size):
         self.labels = np.array(labels)
@@ -94,7 +138,16 @@ class BalancedStageSampler(Sampler):
         self.num_classes = 5
         self.per_class = batch_size // self.num_classes
         assert batch_size % self.num_classes == 0, "batch_size must be multiple of 5"
-        self.class_indices = {c: np.where(self.labels == c)[0] for c in range(self.num_classes)}
+        self.class_indices = {
+            c: np.where(self.labels == c)[0].tolist() for c in range(self.num_classes)
+        }
+        for c, idxs in self.class_indices.items():
+            if len(idxs) == 0:
+                print(f"  ⚠ Class {c} has 0 samples — will be absent from training")
+                self.class_indices[c] = [0] * self.per_class
+            elif len(idxs) < self.per_class:
+                repeats = (self.per_class // len(idxs)) + 1
+                self.class_indices[c] = (idxs * repeats)[:self.per_class]
         self.num_batches = len(self.labels) // batch_size
 
     def __iter__(self):
@@ -107,12 +160,13 @@ class BalancedStageSampler(Sampler):
             for c in range(self.num_classes):
                 start = ptr[c]
                 end = start + self.per_class
-                if end > len(self.class_indices[c]):
+                n = len(self.class_indices[c])
+                if end > n:
                     np.random.shuffle(self.class_indices[c])
                     start = 0
-                    end = self.per_class
+                    end = min(self.per_class, n)
                     ptr[c] = 0
-                batch.extend(self.class_indices[c][start:end].tolist())
+                batch.extend(self.class_indices[c][start:end])
                 ptr[c] = end
             np.random.shuffle(batch)
             indices.extend(batch)
@@ -177,6 +231,28 @@ def patient_level_split(dataset, train_ratio=0.8, val_ratio=0.1, seed=42):
     return train_idx, val_idx, test_idx
 
 
+def source_aware_split(dataset, train_r=0.8, val_r=0.1, seed=42):
+    rng = np.random.RandomState(seed)
+    by_source = defaultdict(list)
+    for i, src in enumerate(dataset.sources):
+        by_source[src].append(i)
+
+    train_idx, val_idx, test_idx = [], [], []
+    for src, idxs in by_source.items():
+        idxs = rng.permutation(idxs).tolist()
+        n = len(idxs)
+        t = int(n * train_r)
+        v = int(n * val_r)
+        train_idx.extend(idxs[:t])
+        val_idx.extend(idxs[t:t+v])
+        test_idx.extend(idxs[t+v:])
+
+    rng.shuffle(train_idx)
+    rng.shuffle(val_idx)
+    rng.shuffle(test_idx)
+    return train_idx, val_idx, test_idx
+
+
 def train_epoch(model, loader, optimizer, loss_coral, loss_proto, device, epoch=0, scaler=None, grad_clip=1.0):
     model.train()
     total_loss = 0
@@ -222,6 +298,7 @@ def train_epoch(model, loader, optimizer, loss_coral, loss_proto, device, epoch=
 
 @torch.no_grad()
 def validate(model, loader, device):
+    from sklearn.metrics import cohen_kappa_score
     model.eval()
     if model.zero_shot_only:
         correct = 0
@@ -232,15 +309,27 @@ def validate(model, loader, device):
             correct += (grades == labels).sum().item()
             total += labels.size(0)
         acc = correct / total
-        return acc, acc, 1.0
+        return acc, acc, 1.0, 0.0
 
     all_ord_logits = []
     all_labels = []
+    all_proto_raw = []
     for images, labels in tqdm(loader, desc="Val"):
         images, labels = images.to(device), labels.to(device)
-        _, _, ordinal_logits = model(images)
-        all_ord_logits.append(ordinal_logits.cpu())
+        proto_logits, _, ordinal_logits = model(images)
+        if ordinal_logits is None:
+            all_proto_raw.append(proto_logits.argmax(dim=-1).cpu())
+        else:
+            all_ord_logits.append(ordinal_logits.cpu())
         all_labels.append(labels.cpu())
+    labels_cat = torch.cat(all_labels)
+    n_total = len(labels_cat)
+
+    if len(all_proto_raw) > 0:
+        proto_preds = torch.cat(all_proto_raw)
+        acc = (proto_preds == labels_cat).float().mean().item()
+        kappa = cohen_kappa_score(labels_cat.numpy(), proto_preds.numpy(), weights="quadratic")
+        return acc, acc, 1.0, kappa
 
     ord_logits = torch.cat(all_ord_logits)
     labels_cat = torch.cat(all_labels)
@@ -248,6 +337,7 @@ def validate(model, loader, device):
 
     raw_preds = (ord_logits / model.ordinal_temperature.cpu() > 0.0).sum(dim=-1)
     raw_acc = (raw_preds == labels_cat).float().mean().item()
+    raw_kappa = cohen_kappa_score(labels_cat.numpy(), raw_preds.numpy(), weights="quadratic")
 
     best_correct = 0
     best_temp = 1.0
@@ -259,40 +349,56 @@ def validate(model, loader, device):
             best_temp = t
     cal_acc = best_correct / n_total
 
-    return raw_acc, cal_acc, best_temp
+    return raw_acc, cal_acc, best_temp, raw_kappa
 
 
 def build_dataset(config, transform, split="train", heavy_transform=None):
     source = config["data"].get("source", "local")
-    if source == "huggingface":
-        hf_name = config["data"]["hf_dataset"]
-        hf_split = config["data"].get("hf_split", "train")
-        dataset = HuggingFaceEyePACSDataset(
-            hf_dataset_name=hf_name, split=hf_split, transform=transform, heavy_transform=heavy_transform
+    if source == "merged":
+        csv_path = config["data"]["merged_csv"]
+        full_dataset = MergedDataset(
+            csv_path, transform=transform, heavy_transform=heavy_transform,
         )
-        n = len(dataset)
-        rng = np.random.RandomState(42)
-        indices = rng.permutation(n).tolist()
-        train_end = int(n * config["data"]["train_ratio"])
-        val_end = train_end + int(n * config["data"]["val_ratio"])
+        train_idx, val_idx, test_idx = source_aware_split(
+            full_dataset,
+            train_r=config["data"]["train_ratio"],
+            val_r=config["data"]["val_ratio"],
+        )
         if split == "train":
-            return Subset(dataset, indices[:train_end])
+            return Subset(full_dataset, train_idx)
         elif split == "val":
-            return Subset(dataset, indices[train_end:val_end])
-        return Subset(dataset, indices[val_end:])
+            return Subset(full_dataset, val_idx)
+        return Subset(full_dataset, test_idx)
+    elif source == "huggingface":
+        hf_name = config["data"]["hf_dataset"]
+        hf_base = config["data"].get("hf_split", "train")
+        tr = config["data"]["train_ratio"]
+        vr = config["data"]["val_ratio"]
+        pct_map = {
+            "train": f"{hf_base}[:{int(tr*100)}%]",
+            "val": f"{hf_base}[{int(tr*100)}%:{int((tr+vr)*100)}%]",
+            "test": f"{hf_base}[{int((tr+vr)*100)}%:]",
+        }
+        dataset = HuggingFaceEyePACSDataset(
+            hf_dataset_name=hf_name, split=pct_map.get(split, split),
+            transform=transform, heavy_transform=heavy_transform,
+        )
+        return Subset(dataset, range(len(dataset)))
     else:
         csv_path = config["data"]["labels_csv"]
         image_dir = config["data"]["processed_path"]
         if not os.path.exists(image_dir):
             image_dir = config["data"]["raw_path"]
         if config["training"].get("patient_level_split", False):
-            full_dataset = EyePACSWithPatientID(csv_path, image_dir, transform=transform)
-            train_idx, val_idx, _ = patient_level_split(
+            full_dataset = EyePACSWithPatientID(csv_path, image_dir, transform=transform, heavy_transform=heavy_transform)
+            train_idx, val_idx, test_idx = patient_level_split(
                 full_dataset, config["data"]["train_ratio"], config["data"]["val_ratio"]
             )
             if split == "train":
                 return Subset(full_dataset, train_idx)
-            return Subset(full_dataset, val_idx)
+            elif split == "val":
+                return Subset(full_dataset, val_idx)
+            return Subset(full_dataset, test_idx)
         else:
             full_dataset = EyePACSDataset(csv_path, image_dir, transform=transform, heavy_transform=heavy_transform)
             n = len(full_dataset)
@@ -302,7 +408,9 @@ def build_dataset(config, transform, split="train", heavy_transform=None):
             val_end = train_end + int(n * config["data"]["val_ratio"])
             if split == "train":
                 return Subset(full_dataset, indices[:train_end])
-            return Subset(full_dataset, indices[train_end:val_end])
+            elif split == "val":
+                return Subset(full_dataset, indices[train_end:val_end])
+            return Subset(full_dataset, indices[val_end:])
 
 
 def sync_to_drive(src_path, drive_dir):
@@ -313,13 +421,13 @@ def sync_to_drive(src_path, drive_dir):
     print(f"Synced to Drive: {drive_dir}")
 
 
-def save_checkpoint(path, model, optimizer, scheduler, epoch, best_acc, drive_path=None):
+def save_checkpoint(path, model, optimizer, scheduler, epoch, best_kappa, drive_path=None):
     torch.save({
         "epoch": epoch,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict(),
-        "best_acc": best_acc,
+        "best_kappa": best_kappa,
         "text_descriptions": model.get_prototype_descriptions(),
     }, path)
     print(f"Checkpoint saved -> {path}")
@@ -332,7 +440,9 @@ def load_checkpoint(path, model, optimizer, scheduler, device):
     model.load_state_dict(ckpt["model_state_dict"], strict=False)
     optimizer.load_state_dict(ckpt["optimizer_state_dict"])
     scheduler.load_state_dict(ckpt["scheduler_state_dict"])
-    return ckpt["epoch"], ckpt["best_acc"]
+    epoch = ckpt["epoch"]
+    best_kappa = ckpt.get("best_kappa", 0.0)
+    return epoch, best_kappa
 
 
 def main(config, drive_path=None, resume=False):
@@ -353,7 +463,7 @@ def main(config, drive_path=None, resume=False):
 
     if mc.get("zero_shot_only", False):
         print("Pure zero-shot mode: no training, evaluating directly...")
-        raw_acc, _, _ = validate(model, val_loader, device)
+        raw_acc, _, _, _ = validate(model, val_loader, device)
         print(f"Zero-shot validation accuracy: {raw_acc:.4f}")
         return
 
@@ -392,14 +502,14 @@ def main(config, drive_path=None, resume=False):
         os.makedirs(drive_path, exist_ok=True)
 
     start_epoch = 0
-    best_acc = 0.0
+    best_kappa = -1.0
 
     if resume:
         resume_path = latest_path if os.path.exists(latest_path) else best_path
         if os.path.exists(resume_path):
-            start_epoch, best_acc = load_checkpoint(resume_path, model, optimizer, scheduler, device)
+            start_epoch, best_kappa = load_checkpoint(resume_path, model, optimizer, scheduler, device)
             start_epoch += 1
-            print(f"Resuming from epoch {start_epoch+1}/{total_epochs} (best_acc={best_acc:.4f})")
+            print(f"Resuming from epoch {start_epoch+1}/{total_epochs} (best_kappa={best_kappa:.4f})")
         else:
             print("No checkpoint found for resume — starting from scratch")
 
@@ -409,17 +519,17 @@ def main(config, drive_path=None, resume=False):
     for epoch in range(start_epoch, total_epochs):
         print(f"\nEpoch {epoch+1}/{total_epochs}")
         train_loss, train_metrics = train_epoch(model, train_loader, optimizer, loss_coral, loss_proto, device, epoch=epoch, scaler=scaler, grad_clip=grad_clip)
-        raw_acc, cal_acc, cal_temp = validate(model, val_loader, device)
+        raw_acc, cal_acc, cal_temp, kappa = validate(model, val_loader, device)
         scheduler.step()
         lr = optimizer.param_groups[0]["lr"]
-        print(f"Loss: {train_loss:.4f} | Raw: {raw_acc:.4f} | Cal: {cal_acc:.4f} | LR: {lr:.2e}")
+        print(f"Loss: {train_loss:.4f} | Raw: {raw_acc:.4f} | Cal: {cal_acc:.4f} | Kappa: {kappa:.4f} | LR: {lr:.2e}")
         print(f"  coral={train_metrics['coral_loss']:.4f} proto={train_metrics['proto_loss']:.4f} temp={cal_temp:.2f}")
 
-        save_checkpoint(latest_path, model, optimizer, scheduler, epoch, best_acc, drive_path)
+        save_checkpoint(latest_path, model, optimizer, scheduler, epoch, best_kappa, drive_path)
 
-        if raw_acc > best_acc:
-            best_acc = raw_acc
-            save_checkpoint(best_path, model, optimizer, scheduler, epoch, best_acc, drive_path)
+        if kappa > best_kappa:
+            best_kappa = kappa
+            save_checkpoint(best_path, model, optimizer, scheduler, epoch, best_kappa, drive_path)
 
     if drive_path:
         log_dir = config["paths"]["log_dir"]
@@ -429,7 +539,7 @@ def main(config, drive_path=None, resume=False):
                 shutil.copy2(os.path.join(log_dir, f), os.path.join(drive_path, f))
             print(f"Logs synced to Drive: {drive_path}")
 
-    print(f"Done. Best val acc: {best_acc:.4f}")
+    print(f"Done. Best val kappa: {best_kappa:.4f}")
 
 
 if __name__ == "__main__":

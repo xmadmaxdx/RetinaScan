@@ -34,12 +34,23 @@ drive.mount('/content/drive')
 !pip install Pillow==10.3.0
 ```
 
-### 5. Download EyePACS (HuggingFace — no Kaggle auth needed)
+### 5a. [Primary] Download GDRBench merged pack (~10 GB, 6 datasets)
+Download from Google Drive and extract:
+```bash
+!pip install gdown -q
+!gdown 1ZJOEZ73OdWSG0YbFtgaH8hcE_NGfb8D8 -O gdrbench.zip
+!unzip -q gdrbench.zip -d data/gdrbench/images/
+!python merge_datasets.py
+```
+Expected output: ~108,000 images across all 6 sources.
+
+### 5b. [Legacy] Single-dataset EyePACS only (HuggingFace, no auth)
 ```python
 !pip install datasets -q
 from datasets import load_dataset
 ds = load_dataset("bumbledeep/eyepacs", split="train")
 print(f"Loaded {len(ds)} images — already cropped and resized")
+# Then switch config back: data.source = huggingface in train_config.yaml
 ```
 
 ### 6. Install training & evaluation utilities
@@ -66,12 +77,26 @@ print(f"Loaded {len(ds)} images — already cropped and resized")
 
 ---
 
+## Choose Your Data Source
+
+The config defaults to `source: merged` (GDRBench, 6 datasets, ~108k images).
+To use **EyePACS only** (HuggingFace), edit `configs/train_config.yaml` and change:
+```yaml
+data:
+  source: "huggingface"            # was "merged"
+  hf_dataset: "bumbledeep/eyepacs"
+```
+
+Both code paths are fully supported — switch back any time.
+
+---
+
 ## Run the Pipeline
 
 ### Option A: Pure Zero-Shot (no training needed)
 ```bash
-# Dataset already loaded via HuggingFace — skip preprocessing
 # Evaluate zero-shot — CLIP text vs image similarity
+# Ensure data is available first (Step 5a for merged, or 5b + config switch for HF)
 !python src/evaluate/metrics.py --config configs/train_config.yaml
 ```
 

@@ -20,9 +20,9 @@ from src.train import build_dataset, get_val_transform
 from src.model.prototype_bank import SEVERITY_LABELS
 
 
-def get_eval_dataset(config):
+def get_eval_dataset(config, split="val"):
     transform = get_val_transform(config)
-    return build_dataset(config, transform, split="val")
+    return build_dataset(config, transform, split=split)
 
 
 def expected_calibration_error(labels, probs, n_bins=10):
@@ -134,7 +134,7 @@ def print_ordinal_report(labels, preds):
 
 
 @torch.no_grad()
-def evaluate(config, checkpoint_path=None, drive_path=None, tune_thresholds=True):
+def evaluate(config, checkpoint_path=None, drive_path=None, tune_thresholds=True, split="val"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if checkpoint_path and os.path.exists(checkpoint_path):
@@ -154,7 +154,7 @@ def evaluate(config, checkpoint_path=None, drive_path=None, tune_thresholds=True
 
     model.eval()
 
-    dataset = get_eval_dataset(config)
+    dataset = get_eval_dataset(config, split=split)
     loader = DataLoader(dataset, batch_size=config["training"]["batch_size"], shuffle=False, num_workers=2)
 
     all_preds, all_labels, all_probs, all_ord_logits = [], [], [], []
@@ -339,7 +339,8 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", default=None)
     parser.add_argument("--drive-path", default=None, help="Sync results to Google Drive path")
     parser.add_argument("--no-tune", action="store_true", help="Skip threshold tuning")
+    parser.add_argument("--split", default="val", choices=["val", "test"], help="Which split to evaluate")
     args = parser.parse_args()
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
-    evaluate(cfg, args.checkpoint, drive_path=args.drive_path, tune_thresholds=not args.no_tune)
+    evaluate(cfg, args.checkpoint, drive_path=args.drive_path, tune_thresholds=not args.no_tune, split=args.split)

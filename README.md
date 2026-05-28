@@ -3,7 +3,7 @@
 [![Hugging Face](https://img.shields.io/badge/HF-Space-blue)](https://huggingface.co/spaces/YOUR_USER/retinascan)
 [![Colab](https://img.shields.io/badge/Open%20in-Colab-orange)](https://colab.research.google.com/drive/1RRsy4PRRXe51wuCGWgxvnXKe8kJf9n8e?usp=sharing)
 
-RetinaScan grades diabetic retinopathy severity (Grade 0–4) using CLIP vision-language models. It works in two modes — **zero-shot** (no training, instant) or **projection-tuned** (trained, higher accuracy). The core idea is simple: instead of learning what each grade looks like from scratch, we encode clinical descriptions through CLIP's text encoder and compare them to image features.
+RetinaScan grades diabetic retinopathy severity (Grade 0–4) using CLIP vision-language models. Works in two modes — **zero-shot** (no training, instant) or **projection-tuned** (trained, higher accuracy). Trained on the GDRBench merged corpus (108k images across 6 datasets) or EyePACS-only via HuggingFace. Core idea: encode clinical descriptions through CLIP's text encoder and compare them to image features.
 
 ## The Problem
 
@@ -12,6 +12,8 @@ RetinaScan grades diabetic retinopathy severity (Grade 0–4) using CLIP vision-
 ## Results
 
 Zero-shot CLIP alone cannot separate DR severity — the text embeddings for different grades are too close in joint space, so every image maps to "No DR" (72.62% accuracy, 0% recall on Grades 1–4). Training the projection head is required.
+
+The following results are from **EyePACS-only** training (our initial experiment, 35k images). Retraining on the full GDRBench merged corpus is in progress.
 
 After 50 epochs of phased multi-task training with a balanced sampler, the model reached these numbers:
 
@@ -35,7 +37,7 @@ The final model (epoch 50) has similar accuracy (62.82%) but better ordinal metr
 | Grade 3 — Severe NPDR | 50.00% | 1.20% | 2.35% | 83 |
 | Grade 4 — Proliferative DR | 0.00% | 0.00% | 0.00% | 78 |
 
-Low recall on Grades 3–4 is expected — only 83 and 78 samples respectively. The model simply never sees enough examples of these grades to learn them well. More data for minority classes would be the main lever for improvement.
+Low recall on Grades 3–4 is expected — only 83 and 78 samples respectively. The model simply never sees enough examples of these grades to learn them well. The GDRBench merged corpus addresses this with ~3,700 combined Grade 3+4 samples (22× more) — retraining results pending.
 
 ### Confusion Matrices
 
@@ -60,16 +62,16 @@ CLIP Text Encoder (frozen)           CLIP Image Encoder (frozen)
   Severity Descriptions ──► text     retina fundus ──► image
   (Grade 0-4 clinical        features     image        features
    language)                    │                        │
-                                 ▼                        ▼
+                                ▼                        ▼
                       ┌──────────────────────────────────┐
                       │     Shared Projection Head       │
                       │     (only trainable part)        │
                       └────────────┬─────────────────────┘
                                    │
                     ┌──────────────┴──────────────┐
-                    ▼                              ▼
-           Cosine Similarity               Ordinal Regression
-           + Temperature Scaling           (CORAL head, 4 tasks)
+                    ▼                             ▼
+           Cosine Similarity                Ordinal Regression
+           + Temperature Scaling            (CORAL head, 4 tasks)
                     │                              │
                     ▼                              ▼
            Interpretable Similarities       Clinically-grounded
@@ -154,8 +156,10 @@ The full training history — every bug, fix, calibration run, and epoch log —
 
 ```
 RetinaScan/
-├── data/raw/                      # Raw EyePACS dataset
-├── data/processed/                # Preprocessed images
+├── data/gdrbench/images/          # GDRBench merged pack (6 datasets)
+├── data/merged.csv                # Unified CSV (image_path, grade, source)
+├── data/raw/                      # Raw EyePACS dataset (legacy)
+├── data/processed/                # Preprocessed images (legacy)
 ├── src/
 │   ├── preprocess.py              # CLAHE + Ben Graham + crop-to-circle
 │   ├── calibrate.py               # Post-hoc temperature scaling (ECE optimization)
@@ -172,10 +176,10 @@ RetinaScan/
 │   └── export_onnx.py             # ONNX export + latency benchmark
 ├── configs/
 │   └── train_config.yaml          # All hyperparameters
+├── merge_datasets.py              # Merge GDRBench into unified CSV
 ├── notebooks/
 │   ├── EDA.ipynb
-│   ├── Train.ipynb
-│   └── Evaluate.ipynb
+│   └── Train.ipynb
 ├── app.py                         # Gradio interface (HF Spaces)
 ├── terminal.md                    # Colab installation guide
 ├── journey.md                     # Full training history and debugging log
@@ -186,12 +190,15 @@ RetinaScan/
 
 ## Dataset
 
-Two data sources supported (set `data.source` in config):
+Three data sources supported (set `data.source` in config):
 
 | Source | Size | Auth | Preprocessing |
 |--------|------|------|---------------|
-| `huggingface` (default) | 6.5GB — `bumbledeep/eyepacs` | None | Already cropped + resized |
-| `local` | 88GB — EyePACS Kaggle | Kaggle API token | Run `src/preprocess.py` |
+| `merged` **(primary)** | ~10 GB — GDRBench (6 datasets) | Google Drive | Already 512×512, cropped |
+| `huggingface` (legacy) | 6.5 GB — `bumbledeep/eyepacs` | None | Already cropped + resized |
+| `local` (legacy) | 88 GB — EyePACS Kaggle | Kaggle API token | Run `src/preprocess.py` |
+
+The `merged` source combines APTOS, DeepDR, IDRiD, RLDR, DDR, and EyePACS into a single 108k-image corpus with source-aware train/val/test splitting. This dramatically increases minority class representation — from ~161 Grade 3+4 samples (EyePACS-only) to ~3,700 across all six datasets.
 
 ## Quick Start
 
@@ -201,9 +208,12 @@ pip install -r requirements.txt
 python src/evaluate/metrics.py --config configs/train_config.yaml
 ```
 
-### With Projection Tuning (Colab T4, ~14-15h)
+### With Projection Tuning (Colab T4)
 ```bash
-# Dataset loads automatically from HuggingFace — no download step needed
+# Option 1: GDRBench merged (default) — download first
+#   python merge_datasets.py          # after extracting GDRBench pack
+# Option 2: EyePACS only — switch source to "huggingface" in config
+#   # No download step — loads from HuggingFace
 python src/train.py --config configs/train_config.yaml
 python src/calibrate.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt
 python src/evaluate/metrics.py --config configs/train_config.yaml --checkpoint checkpoints/best.pt

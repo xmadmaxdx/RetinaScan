@@ -1,7 +1,8 @@
 # RetinaScan Training Configuration
 
 data:
-  source: "huggingface"           # "huggingface" or "local" (CSB + image dir)
+  source: "merged"                # "merged", "huggingface", or "local"
+  merged_csv: "data/merged.csv"
   hf_dataset: "bumbledeep/eyepacs"
   hf_split: "train"
   raw_path: "data/raw"
@@ -10,7 +11,7 @@ data:
   train_ratio: 0.8
   val_ratio: 0.1
   test_ratio: 0.1
-  image_size: 224
+  image_size: 512
 
 model:
   backbone: "ViT-B/16"
@@ -40,7 +41,7 @@ training:
   patient_level_split: true
 
 augmentation:
-  random_crop: 224
+  random_crop: 512
   color_jitter: 0.3
   gaussian_blur: 0.1
   horizontal_flip: true
