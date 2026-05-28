@@ -468,7 +468,7 @@ def main(config, drive_path=None, resume=False, tweak=False):
         for k in range(4):
             pos = (labels_t > k).sum().item()
             neg = (labels_t <= k).sum().item()
-            ratio = neg / max(pos, 1)
+            ratio = (neg / max(pos, 1)) ** 0.5
             pos_w.append(round(ratio, 2))
         print(f"  CORAL pos_weight: {pos_w}")
     else:
@@ -532,7 +532,8 @@ def main(config, drive_path=None, resume=False, tweak=False):
     if extra > 0:
         total_epochs = start_epoch + extra
         print(f"  extra_epochs={extra} -> training until epoch {total_epochs}")
-        current_lr = optimizer.param_groups[0]["lr"]
+        for pg in optimizer.param_groups:
+            pg["lr"] = config["training"]["learning_rate"] * 0.1
         scheduler = torch.optim.lr_scheduler.LinearLR(
             optimizer, start_factor=1.0, end_factor=0.1, total_iters=extra
         )
