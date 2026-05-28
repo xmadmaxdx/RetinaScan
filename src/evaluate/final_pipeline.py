@@ -4,7 +4,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 import yaml
 import argparse
 import torch
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score, cohen_kappa_score, f1_score
 import numpy as np
@@ -258,53 +257,6 @@ def knn_evaluate(config, checkpoint_path, k=10):
     }, train_features, train_labels
 
 
-def smoothing_evaluate(config, checkpoint_path):
-    print(f"\n{'='*60}")
-    print(f"  PREDICTION SMOOTHING: {os.path.basename(checkpoint_path)}")
-    print(f"{'='*60}")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, ckpt = _load_model(config, checkpoint_path)
-
-    val_ds = build_dataset(config, get_val_transform(config), split="val")
-    loader = DataLoader(
-        val_ds, batch_size=config["training"]["batch_size"],
-        shuffle=False, num_workers=2
-    )
-
-    kernel = torch.tensor([0.05, 0.25, 0.40, 0.25, 0.05], dtype=torch.float32, device=device)
-
-    all_preds, all_labels = [], []
-    for images, labels in tqdm(loader, desc="Smoothing eval"):
-        images = images.to(device)
-        proto_logits, _, ordinal_logits = model(images)
-        if ordinal_logits is not None:
-            cal_proto = proto_logits / model.prototype_temperature
-            probs = torch.softmax(cal_proto, dim=-1)
-        else:
-            probs = torch.softmax(proto_logits, dim=-1)
-        smoothed = F.conv1d(
-            probs.unsqueeze(1).float(),
-            kernel.view(1, 1, -1),
-            padding=2,
-        ).squeeze(1)
-        smoothed = smoothed / smoothed.sum(dim=-1, keepdim=True).clamp(min=1e-8)
-        grades = smoothed.argmax(dim=-1)
-        all_preds.extend(grades.cpu().tolist())
-        all_labels.extend(labels.tolist())
-
-    labels_np = np.array(all_labels)
-    preds_np = np.array(all_preds)
-    acc = accuracy_score(labels_np, preds_np)
-    kappa = cohen_kappa_score(labels_np, preds_np, weights="quadratic")
-    print(f"  Smoothing Accuracy: {acc:.4f} | Kappa: {kappa:.4f}")
-    return {
-        "accuracy": acc,
-        "kappa": kappa,
-        "mae": np.abs(preds_np - labels_np).mean(),
-        "off_by_one": (np.abs(preds_np - labels_np) <= 1).mean(),
-    }
-
-
 def build_table(results, baseline_kappa, baseline_acc):
     print(f"\n{'='*72}")
     print(f"  FINAL COMPARISON — All Modes")
@@ -359,7 +311,7 @@ def final_pipeline(config, checkpoints):
     print(f"  RETINASCAN — FINAL VALIDATION PIPELINE")
     print(f"{'='*72}")
     print(f"  Checkpoints: {[os.path.basename(c) for c in checkpoints]}")
-    print(f"  Modes: baseline, calibrate+tune, SWA, ensemble, KNN, smoothing")
+    print(f"  Modes: baseline, calibrate+tune, SWA, ensemble, KNN")
     print()
 
     global BEST_KAPPA_SO_FAR
@@ -446,15 +398,7 @@ def final_pipeline(config, checkpoints):
         print(f"  KNN failed: {e}")
         all_results.append((label, {"accuracy": 0, "kappa": 0, "mae": 0, "off_by_one": 0}, False))
 
-    # 6. Prediction smoothing on best checkpoint (eval-only — applied post-prediction)
-    label = f"Smoothing on {os.path.basename(checkpoints[0])}"
-    try:
-        metrics = smoothing_evaluate(config, checkpoints[0])
-        all_results.append((label, metrics, False))
-        print(f"  {label}: acc={metrics['accuracy']:.4f} kappa={metrics['kappa']:.4f}")
-    except Exception as e:
-        print(f"  Smoothing failed: {e}")
-        all_results.append((label, {"accuracy": 0, "kappa": 0, "mae": 0, "off_by_one": 0}, False))
+
 
     baseline = all_results[0][1]
     baseline_kappa = baseline["kappa"]
