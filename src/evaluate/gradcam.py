@@ -71,15 +71,25 @@ def maybe_download_image(image_path):
         return image_path
     print(f"{image_path} not found — downloading sample retina image...")
     import requests
-    url = "https://raw.githubusercontent.com/HzFu/EyeQ/master/Examples/0.jpg"
+    urls = [
+        "https://www.burlingtoneyedocs.ca/storage/2015/03/IM003081.jpg",
+        "https://upload.wikimedia.org/wikipedia/commons/1/1e/Fundus_photograph_of_normal_retina.jpg",
+    ]
     d = os.path.dirname(image_path)
     if d:
         os.makedirs(d, exist_ok=True)
-    r = requests.get(url, timeout=30)
-    with open(image_path, "wb") as f:
-        f.write(r.content)
-    print(f"Downloaded -> {image_path}")
-    return image_path
+    for url in urls:
+        try:
+            r = requests.get(url, timeout=30)
+            if r.status_code == 200 and len(r.content) > 1000:
+                with open(image_path, "wb") as f:
+                    f.write(r.content)
+                print(f"Downloaded -> {image_path}")
+                return image_path
+        except Exception:
+            continue
+    print("Failed to download sample image. Provide a local path.")
+    sys.exit(1)
 
 
 def main(config, checkpoint_path, image_path, save_dir="outputs/gradcam"):
@@ -91,7 +101,8 @@ def main(config, checkpoint_path, image_path, save_dir="outputs/gradcam"):
         model.load_state_dict(ckpt["model_state_dict"], strict=False)
         print(f"Loaded checkpoint: {checkpoint_path}")
     else:
-        print("No checkpoint found — running in pure zero-shot mode")
+        print(f"No checkpoint found at '{checkpoint_path}' — running in pure zero-shot mode")
+        print(f"  Tip: check the path is relative to CWD: {os.getcwd()}")
 
     model.eval()
 
