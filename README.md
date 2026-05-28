@@ -180,6 +180,34 @@ The primary limitation of the EyePACS-only experiment was data scarcity for seve
 
 ---
 
+## Interpretability: Grad-CAM
+
+The last transformer block's attention is backpropagated to produce spatial heatmaps showing which image regions drive the model's prediction. The heatmap highlights features most similar to the matched text prototype.
+
+<img src="outputs/gradcam/gradcam_sample.jpeg" width="500">
+
+*Grad-CAM overlay for a normal retina (Grade 0). The blue uniform activation reflects the absence of lesion features — the model finds no region strongly matching pathology descriptions.*
+
+---
+
+## Deployment: ONNX Export
+
+The model can be exported to ONNX for CPU inference (~400ms per image on a single core):
+
+```bash
+python deploy/export_onnx.py --checkpoint checkpoints/final.pt --output deploy/model.onnx
+```
+
+The exported model includes the CLIP vision encoder, projection head, and prototype similarity head. Requires `onnxruntime` for inference:
+
+```python
+import onnxruntime as ort
+session = ort.InferenceSession("deploy/model.onnx")
+logits, features = session.run(None, {"input": image_numpy})
+```
+
+---
+
 ## Limitations
 
 - **Grade 1 recall** (15.28%) remains limited due to subjective grading boundaries.
@@ -204,6 +232,12 @@ RetinaScan/
 │       ├── metrics.py              # Full evaluation report
 │       ├── final_pipeline.py       # Multi-mode comparison
 │       └── gradcam.py              # Grad-CAM heatmaps
+├── deploy/
+│   ├── export_onnx.py              # ONNX export script
+│   └── model.onnx                  # Exported ONNX model
+├── outputs/
+│   └── gradcam/
+│       └── gradcam_sample.jpeg     # Grad-CAM visualization
 ├── notebooks/merged_train.ipynb    # Colab training notebook
 ├── configs/train_config.yaml       # Hyperparameters
 ├── app.py                          # Gradio deployment

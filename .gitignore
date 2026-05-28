@@ -3,7 +3,7 @@ error.txt
 __pycache__/
 *.pyc
 checkpoints/
-outputs/
+
 
 .DS_Store
 random.txt
