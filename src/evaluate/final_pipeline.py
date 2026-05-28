@@ -207,13 +207,13 @@ def tta_evaluate(config, checkpoint_path, n_runs=10):
     print(f"{'='*60}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, _ = _load_model(config, checkpoint_path)
-    model.train()
 
     from torchvision.transforms import functional as TF
     size = config.get("data", {}).get("image_size", 224)
 
     raw_ds = build_dataset(config, get_val_transform(config), split="val")
-    loader = DataLoader(raw_ds, batch_size=1, shuffle=False, num_workers=2)
+    loader = DataLoader(raw_ds, batch_size=1, shuffle=False, num_workers=2,
+                        pin_memory=True)
 
     all_grades, all_labels = [], []
     for images, labels in tqdm(loader, desc="TTA eval"):

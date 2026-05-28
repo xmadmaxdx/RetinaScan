@@ -448,7 +448,7 @@ def load_checkpoint(path, model, optimizer, scheduler, device):
     return epoch, best_kappa
 
 
-def main(config, drive_path=None, resume=False):
+def main(config, drive_path=None, resume=False, tweak=False):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
     print(f"Data source: {config['data'].get('source', 'local')}")
@@ -461,6 +461,18 @@ def main(config, drive_path=None, resume=False):
     train_sampler = BalancedStageSampler(train_labels, batch_size=config["training"]["batch_size"])
     train_loader = DataLoader(train_ds, batch_size=config["training"]["batch_size"], sampler=train_sampler, num_workers=2, pin_memory=True)
     val_loader = DataLoader(val_ds, batch_size=config["training"]["batch_size"], shuffle=False, num_workers=2, pin_memory=True)
+
+    if tweak:
+        labels_t = torch.tensor(train_labels)
+        pos_w = []
+        for k in range(4):
+            pos = (labels_t > k).sum().item()
+            neg = (labels_t <= k).sum().item()
+            ratio = neg / max(pos, 1)
+            pos_w.append(round(ratio, 2))
+        print(f"  CORAL pos_weight: {pos_w}")
+    else:
+        pos_w = None
 
     model = CLIPZeroShotNetwork(config, device=device)
 
@@ -494,7 +506,7 @@ def main(config, drive_path=None, resume=False):
         )
     else:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_epochs)
-    loss_coral = ClassWeightedCORALLoss()
+    loss_coral = ClassWeightedCORALLoss(pos_weight=pos_w)
     loss_proto = PrototypeFocalLoss(gamma=2.5)
 
     ckpt_dir = config["paths"]["checkpoint_dir"]
@@ -555,9 +567,13 @@ if __name__ == "__main__":
     parser.add_argument("--zero-shot", action="store_true", help="Run pure zero-shot, no training")
     parser.add_argument("--drive-path", default=None, help="Sync checkpoints to Google Drive path")
     parser.add_argument("--resume", action="store_true", help="Resume from checkpoints/latest.pt")
+    parser.add_argument("--tweak", action="store_true", help="Rebalance CORAL with pos_weight for ordinal tasks")
+    parser.add_argument("--num-epochs", type=int, default=None, help="Override total epochs (e.g. 10 for short tweak run)")
     args = parser.parse_args()
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
     if args.zero_shot:
         cfg["model"]["zero_shot_only"] = True
-    main(cfg, drive_path=args.drive_path, resume=args.resume)
+    if args.num_epochs is not None:
+        cfg["training"]["epochs"] = args.num_epochs
+    main(cfg, drive_path=args.drive_path, resume=args.resume, tweak=args.tweak)
