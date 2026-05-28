@@ -19,25 +19,31 @@ class GradCAM:
         self.target_module = target_module
         self.gradients = None
         self.activations = None
+        self._restore_params = []
         self._register_hooks(target_module)
 
     def _register_hooks(self, module):
         def forward_hook(m, input, output):
-            self.activations = output[0] if isinstance(output, tuple) else output
+            inp = input[0] if isinstance(input, tuple) else input
+            self.activations = inp
+            inp.register_hook(self._save_gradient)
         module.register_forward_hook(forward_hook)
 
     def _save_gradient(self, grad):
         self.gradients = grad
 
     def generate(self, image_tensor, class_idx=None):
-        params = [p for p in self.target_module.parameters() if not p.requires_grad]
-        for p in params:
-            p.requires_grad_(True)
+        blocks = self.model.clip_model.visual.transformer.resblocks
+        self._restore_params.clear()
+        for block in blocks[-2:]:
+            for p in block.parameters():
+                if not p.requires_grad:
+                    p.requires_grad_(True)
+                    self._restore_params.append(p)
 
         image_tensor = image_tensor.detach().clone().requires_grad_(True)
 
         logits, _, _ = self.model.forward_gradcam(image_tensor)
-        self.activations.register_hook(self._save_gradient)
 
         if class_idx is None:
             class_idx = logits.argmax(dim=-1).item()
@@ -45,7 +51,7 @@ class GradCAM:
         self.model.zero_grad()
         logits[0, class_idx].backward()
 
-        for p in params:
+        for p in self._restore_params:
             p.requires_grad_(False)
 
         act = self.activations
