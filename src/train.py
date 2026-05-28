@@ -335,13 +335,13 @@ def validate(model, loader, device):
     labels_cat = torch.cat(all_labels)
     n_total = len(labels_cat)
 
-    raw_preds = (ord_logits / model.ordinal_temperature.cpu() > 0.0).sum(dim=-1)
+    raw_preds = (ord_logits > 0.0).sum(dim=-1)
     raw_acc = (raw_preds == labels_cat).float().mean().item()
     raw_kappa = cohen_kappa_score(labels_cat.numpy(), raw_preds.numpy(), weights="quadratic")
 
     best_correct = 0
     best_temp = 1.0
-    for t in [i * 0.1 for i in range(2, 51)]:
+    for t in [i * 0.1 for i in range(2, 51)]:  # grid search over [0.2, 5.0] never double-scales
         preds = (ord_logits / t > 0.0).sum(dim=-1)
         n_correct = (preds == labels_cat).sum().item()
         if n_correct > best_correct:

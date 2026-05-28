@@ -26,8 +26,7 @@ class PrototypeFocalLoss(nn.Module):
         img_norm = F.normalize(image_features, dim=-1)
         proto_norm = F.normalize(text_prototypes, dim=-1)
         sim = torch.matmul(img_norm, proto_norm.t()) / temperature
-        probs = F.softmax(sim, dim=-1)
-        true_probs = probs[torch.arange(len(labels), device=labels.device), labels]
-        focal = torch.pow(1.0 - true_probs, self.gamma)
-        ce = F.cross_entropy(sim, labels, reduction="none")
-        return (focal * ce).mean()
+        log_probs = F.log_softmax(sim, dim=-1)
+        true_log_probs = log_probs[torch.arange(len(labels), device=labels.device), labels]
+        focal = torch.pow(1.0 - torch.exp(true_log_probs), self.gamma)
+        return (focal * (-true_log_probs)).mean()

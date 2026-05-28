@@ -59,7 +59,7 @@ def find_optimal_thresholds(ord_logits, labels):
         targets = (labels > k).float()
         best_t = 0.0
         best_f1 = 0.0
-        for t in [i * 0.1 for i in range(-25, 26)]:
+        for t in [i * 0.1 for i in range(-100, 101)]:
             preds = (ord_logits[:, k] > t).float()
             f1 = f1_score(targets.cpu().numpy(), preds.cpu().numpy(), zero_division=0)
             if f1 > best_f1:
