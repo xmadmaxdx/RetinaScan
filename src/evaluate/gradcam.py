@@ -72,20 +72,25 @@ def maybe_download_image(image_path):
     print(f"{image_path} not found — downloading sample retina image...")
     import requests
     urls = [
-        "https://www.burlingtoneyedocs.ca/storage/2015/03/IM003081.jpg",
-        "https://upload.wikimedia.org/wikipedia/commons/1/1e/Fundus_photograph_of_normal_retina.jpg",
+        ("https://upload.wikimedia.org/wikipedia/commons/1/1e/Fundus_photograph_of_normal_retina.jpg", False),
+        ("https://www.burlingtoneyedocs.ca/storage/2015/03/IM003081.jpg", True),
     ]
     d = os.path.dirname(image_path)
     if d:
         os.makedirs(d, exist_ok=True)
-    for url in urls:
+    for url, check_content in urls:
         try:
-            r = requests.get(url, timeout=30)
-            if r.status_code == 200 and len(r.content) > 1000:
-                with open(image_path, "wb") as f:
-                    f.write(r.content)
-                print(f"Downloaded -> {image_path}")
-                return image_path
+            r = requests.get(url, timeout=30, allow_redirects=True)
+            if r.status_code != 200 or len(r.content) < 1000:
+                continue
+            if check_content and b"<html" in r.content[:500].lower():
+                continue
+            with open(image_path, "wb") as f:
+                f.write(r.content)
+            img = Image.open(image_path)
+            img.verify()
+            print(f"Downloaded -> {image_path}")
+            return image_path
         except Exception:
             continue
     print("Failed to download sample image. Provide a local path.")
@@ -96,13 +101,16 @@ def main(config, checkpoint_path, image_path, save_dir="outputs/gradcam"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = CLIPZeroShotNetwork(config, device=device)
+    if not os.path.exists(checkpoint_path):
+        alt = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), checkpoint_path)
+        if os.path.exists(alt):
+            checkpoint_path = alt
     if os.path.exists(checkpoint_path):
         ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt["model_state_dict"], strict=False)
         print(f"Loaded checkpoint: {checkpoint_path}")
     else:
-        print(f"No checkpoint found at '{checkpoint_path}' — running in pure zero-shot mode")
-        print(f"  Tip: check the path is relative to CWD: {os.getcwd()}")
+        print(f"No checkpoint found — running in pure zero-shot mode")
 
     model.eval()
 
