@@ -12,7 +12,7 @@ LABEL_MAP = {
     "moderate_npdr": 2, "severe_npdr": 3, "pdr": 4
 }
 
-SOURCES = ["APTOS", "DeepDR", "IDRiD", "RLDR", "DDR", "EYEPACS"]
+SOURCES = ["APTOS", "DEEPDR", "IDRID", "RLDR", "DDR", "EYEPACS"]
 
 # Search recursively for source folders (zip may have inner root dir)
 found_any = False
