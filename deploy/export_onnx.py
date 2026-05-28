@@ -42,7 +42,6 @@ def export_to_onnx(config, checkpoint_path=None, output_path="deploy/model.onnx"
         },
         opset_version=opset_version,
         do_constant_folding=True,
-        dynamo=False,
     )
 
     onnx_model = onnx.load(output_path)
