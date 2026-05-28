@@ -442,6 +442,9 @@ def load_checkpoint(path, model, optimizer, scheduler, device):
     scheduler.load_state_dict(ckpt["scheduler_state_dict"])
     epoch = ckpt["epoch"]
     best_kappa = ckpt.get("best_kappa", 0.0)
+    ord_temp = model.ordinal_temperature.item()
+    proto_temp = model.prototype_temperature.item()
+    print(f"  Loaded temps: ordinal={ord_temp:.3f}, prototype={proto_temp:.3f}")
     return epoch, best_kappa
 
 
@@ -523,7 +526,9 @@ def main(config, drive_path=None, resume=False):
         scheduler.step()
         lr = optimizer.param_groups[0]["lr"]
         print(f"Loss: {train_loss:.4f} | Raw: {raw_acc:.4f} | Cal: {cal_acc:.4f} | Kappa: {kappa:.4f} | LR: {lr:.2e}")
-        print(f"  coral={train_metrics['coral_loss']:.4f} proto={train_metrics['proto_loss']:.4f} temp={cal_temp:.2f}")
+        model_ord = model.ordinal_temperature.item()
+        model_proto = model.prototype_temperature.item()
+        print(f"  coral={train_metrics['coral_loss']:.4f} proto={train_metrics['proto_loss']:.4f} cal_temp={cal_temp:.2f} model_temp(ord={model_ord:.2f},proto={model_proto:.2f})")
 
         save_checkpoint(latest_path, model, optimizer, scheduler, epoch, best_kappa, drive_path)
 
