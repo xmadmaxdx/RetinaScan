@@ -44,6 +44,8 @@ class CLIPZeroShotNetwork(nn.Module):
 
         image_size = config["data"].get("image_size", 224)
         patch_size = getattr(clip_model.visual, "patch_size", 16)
+        if isinstance(patch_size, (tuple, list)):
+            patch_size = patch_size[0]
         pretrained_pos = clip_model.visual.positional_embedding
         n_pretrained = pretrained_pos.shape[0]  # 197 for 224x224
         pretrained_grid = int((n_pretrained - 1) ** 0.5)
