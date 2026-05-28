@@ -39,7 +39,7 @@ Download from Google Drive and extract:
 ```bash
 !pip install gdown -q
 !gdown 1ZJOEZ73OdWSG0YbFtgaH8hcE_NGfb8D8 -O gdrbench.zip
-!mkdir -p data/gdrbench/images && unzip -q gdrbench.zip -d data/gdrbench/images/
+!mkdir -p data/gdrbench/images && unzip -qo gdrbench.zip -d data/gdrbench/images/
 !python merge_datasets.py
 ```
 Expected output: ~108,000 images across all 6 sources.
