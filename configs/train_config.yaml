@@ -11,7 +11,7 @@ data:
   train_ratio: 0.8
   val_ratio: 0.1
   test_ratio: 0.1
-  image_size: 512
+  image_size: 224
 
 model:
   backbone: "ViT-B/16"
@@ -41,7 +41,7 @@ training:
   patient_level_split: true
 
 augmentation:
-  random_crop: 512
+  random_crop: 224
   color_jitter: 0.3
   gaussian_blur: 0.1
   horizontal_flip: true
