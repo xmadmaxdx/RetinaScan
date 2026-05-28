@@ -204,57 +204,6 @@ def ensemble_evaluate(config, checkpoints):
     }
 
 
-def tta_evaluate(config, checkpoint_path, n_runs=10):
-    print(f"\n{'='*60}")
-    print(f"  TTA ({n_runs}x): {os.path.basename(checkpoint_path)}")
-    print(f"{'='*60}")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, _ = _load_model(config, checkpoint_path)
-
-    from torchvision.transforms import functional as TF
-    size = config.get("data", {}).get("image_size", 224)
-
-    raw_ds = build_dataset(config, get_val_transform(config), split="val")
-    loader = DataLoader(raw_ds, batch_size=1, shuffle=False, num_workers=2,
-                        pin_memory=True)
-
-    all_grades, all_labels = [], []
-    for images, labels in tqdm(loader, desc="TTA eval"):
-        img_tensor = images.to(device)
-        grades_list = []
-        for _ in range(n_runs):
-            aug = img_tensor.clone()
-            if torch.rand(1).item() < 0.5:
-                aug = TF.hflip(aug)
-            angle = (torch.rand(1).item() - 0.5) * 10
-            translate = ((torch.rand(1).item() - 0.5) * 0.1 * size,
-                         (torch.rand(1).item() - 0.5) * 0.1 * size)
-            aug = TF.affine(aug, angle=angle, translate=translate, scale=1.0, shear=0)
-            with torch.no_grad():
-                _, _, ordinal_logits = model(aug)
-                if ordinal_logits is not None:
-                    grade = (ordinal_logits > 0.0).sum(dim=-1).item()
-                else:
-                    grade = model(aug)[0].argmax(dim=-1).item()
-            grades_list.append(grade)
-        mean_grade = round(sum(grades_list) / n_runs)
-        all_grades.append(mean_grade)
-        all_labels.append(labels.item())
-
-    model.eval()
-    labels_np = np.array(all_labels)
-    preds_np = np.array(all_grades)
-    acc = accuracy_score(labels_np, preds_np)
-    kappa = cohen_kappa_score(labels_np, preds_np, weights="quadratic")
-    print(f"  TTA Accuracy: {acc:.4f} | Kappa: {kappa:.4f}")
-    return {
-        "accuracy": acc,
-        "kappa": kappa,
-        "mae": np.abs(preds_np - labels_np).mean(),
-        "off_by_one": (np.abs(preds_np - labels_np) <= 1).mean(),
-    }
-
-
 def knn_evaluate(config, checkpoint_path, k=10):
     print(f"\n{'='*60}")
     print(f"  KNN (k={k}): {os.path.basename(checkpoint_path)}")
@@ -410,7 +359,7 @@ def final_pipeline(config, checkpoints):
     print(f"  RETINASCAN — FINAL VALIDATION PIPELINE")
     print(f"{'='*72}")
     print(f"  Checkpoints: {[os.path.basename(c) for c in checkpoints]}")
-    print(f"  Modes: baseline, calibrate+tune, SWA, ensemble, TTA, KNN, smoothing")
+    print(f"  Modes: baseline, calibrate+tune, SWA, ensemble, KNN, smoothing")
     print()
 
     global BEST_KAPPA_SO_FAR
@@ -481,17 +430,7 @@ def final_pipeline(config, checkpoints):
             print(f"  Ensemble failed: {e}")
             all_results.append((label, {"accuracy": 0, "kappa": 0, "mae": 0, "off_by_one": 0}, False))
 
-    # 5. TTA on best checkpoint (eval-only — not saveable, would require TTA at inference)
-    label = f"TTA on {os.path.basename(checkpoints[0])}"
-    try:
-        metrics = tta_evaluate(config, checkpoints[0], n_runs=10)
-        all_results.append((label, metrics, False))
-        print(f"  {label}: acc={metrics['accuracy']:.4f} kappa={metrics['kappa']:.4f}")
-    except Exception as e:
-        print(f"  TTA failed: {e}")
-        all_results.append((label, {"accuracy": 0, "kappa": 0, "mae": 0, "off_by_one": 0}, False))
-
-    # 6. KNN on best checkpoint
+    # 5. KNN on best checkpoint
     label = f"KNN (10-NN) on {os.path.basename(checkpoints[0])}"
     try:
         metrics, knn_feats, knn_labels = knn_evaluate(config, checkpoints[0], k=10)
@@ -507,7 +446,7 @@ def final_pipeline(config, checkpoints):
         print(f"  KNN failed: {e}")
         all_results.append((label, {"accuracy": 0, "kappa": 0, "mae": 0, "off_by_one": 0}, False))
 
-    # 7. Prediction smoothing on best checkpoint (eval-only — not saveable, applied post-prediction)
+    # 6. Prediction smoothing on best checkpoint (eval-only — applied post-prediction)
     label = f"Smoothing on {os.path.basename(checkpoints[0])}"
     try:
         metrics = smoothing_evaluate(config, checkpoints[0])
