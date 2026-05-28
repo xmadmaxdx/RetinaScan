@@ -85,7 +85,7 @@ def main(config, checkpoint_path, image_path, save_dir="outputs/gradcam"):
 
     model = CLIPZeroShotNetwork(config, device=device)
     if os.path.exists(checkpoint_path):
-        ckpt = torch.load(checkpoint_path, map_location=device)
+        ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt["model_state_dict"], strict=False)
         print(f"Loaded checkpoint: {checkpoint_path}")
     else:

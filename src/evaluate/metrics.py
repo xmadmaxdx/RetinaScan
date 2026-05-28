@@ -139,7 +139,7 @@ def evaluate(config, checkpoint_path=None, drive_path=None, tune_thresholds=True
 
     if checkpoint_path and os.path.exists(checkpoint_path):
         model = CLIPZeroShotNetwork(config, device=device)
-        ckpt = torch.load(checkpoint_path, map_location=device)
+        ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt["model_state_dict"], strict=False)
         if "ordinal_temperature" in ckpt:
             model.set_temperatures(ord_temp=ckpt["ordinal_temperature"], proto_temp=ckpt["prototype_temperature"])

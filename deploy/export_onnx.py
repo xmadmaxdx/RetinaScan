@@ -13,7 +13,7 @@ def export_to_onnx(config, checkpoint_path=None, output_path="deploy/model.onnx"
 
     model = CLIPZeroShotNetwork(config, device=device)
     if checkpoint_path and os.path.exists(checkpoint_path):
-        ckpt = torch.load(checkpoint_path, map_location="cpu")
+        ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
         model.load_state_dict(ckpt["model_state_dict"], strict=False)
         print(f"Loaded checkpoint: {checkpoint_path}")
     else:

@@ -29,7 +29,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 checkpoint_path = "checkpoints/best.pt"
 if os.path.exists(checkpoint_path):
     model = CLIPZeroShotNetwork(CONFIG, device=device)
-    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=True)
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model_state_dict"], strict=False)
     if "ordinal_temperature" in ckpt:
         model.set_temperatures(ord_temp=ckpt["ordinal_temperature"], proto_temp=ckpt["prototype_temperature"])

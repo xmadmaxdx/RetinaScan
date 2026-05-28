@@ -27,7 +27,7 @@ def expected_calibration_error(labels, probs, n_bins=10):
 def calibrate(config, checkpoint_path):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = CLIPZeroShotNetwork(config, device=device)
-    ckpt = torch.load(checkpoint_path, map_location=device)
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model_state_dict"], strict=False)
     model.eval()
     print(f"Loaded checkpoint: {checkpoint_path}")
