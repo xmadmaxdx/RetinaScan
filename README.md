@@ -102,9 +102,9 @@ Seven evaluation modes were tested on the validation set (2,028 images):
 |:----|:-------:|:-----:|:---:|:--------:|
 | Baseline (ordinal head) | 51.97% | 0.6166 | 0.6159 | 88.21% |
 | Calibrated + Tuned | 54.59% | 0.6330 | 0.5917 | 87.87% |
-| **KNN (10-NN on features)** | **69.97%** | **0.6987** | **0.4946** | **82.30%** |
+| **KNN (10-NN on features)** | **74.75%** | **0.7606** | **0.4088** | **85.80%** |
 
-The KNN approach uses the projection head to extract 512-dim features, then classifies by majority vote among the 10 nearest training samples. This non-parametric method outperforms the linear ordinal head by approximately 15 accuracy points, suggesting the feature space is well-structured but the linear classifier cannot fully exploit it.
+The KNN approach uses the projection head to extract 512-dim features, then classifies by majority vote among the 10 nearest training samples. This non-parametric method outperforms the linear ordinal head by approximately 20 accuracy points, suggesting the feature space is well-structured but the linear classifier cannot fully exploit it.
 
 ### Test Performance
 
@@ -127,7 +127,7 @@ The KNN approach uses the projection head to extract 512-dim features, then clas
 | Grade 3 — Severe NPDR | 63.04% | 25.00% | 35.80% | 116 |
 | Grade 4 — Proliferative DR | 64.58% | 41.06% | 50.20% | 151 |
 
-Grade 1 recall remains low, consistent with known inter-rater variability for mild NPDR. Grade 3 recall is limited by its position as a boundary class between moderate and proliferative.
+Grade 1 recall remains low, consistent with known inter-rater variability for mild NPDR. Grade 3 recall is limited by its position as a boundary class between moderate and proliferative. All results are reproducible from `notebooks/Merged_Train.ipynb`.
 
 ---
 

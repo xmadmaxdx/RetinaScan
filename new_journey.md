@@ -323,20 +323,20 @@ This produced an improvement from 0.5976 to 0.6166 kappa in a single epoch (Sect
 | Baseline | 51.97% | 0.6166 | 0.6159 | 88.21% | ✓ Saved |
 | Calibrated + Tuned | 54.59% | 0.6330 | 0.5917 | 87.87% | ✓ Saved |
 | TTA (10x) | 8.78% | 0.0395 | 2.3245 | 28.06% | ✗ Removed |
-| **KNN (10-NN)** | **69.97%** | **0.6987** | **0.4946** | **82.30%** | **✓ Final** |
+| **KNN (10-NN)** | **74.75%** | **0.7606** | **0.4088** | **85.80%** | **✓ Final** |
 | Prediction Smoothing | 30.77% | 0.4348 | 0.8294 | 89.45% | ✗ Removed |
 
 ### 7.4 Per-Class Performance — KNN (Validation)
 
 | Class | Precision | Recall | F1 | Support |
 |-------|:--------:|:------:|:--:|:-------:|
-| Grade 0 — No DR | 79.33% | 87.38% | 83.16% | 927 |
-| Grade 1 — Mild NPDR | 41.51% | 15.38% | 22.45% | 143 |
-| Grade 2 — Moderate NPDR | 61.85% | 72.50% | 66.76% | 691 |
-| Grade 3 — Severe NPDR | 39.13% | 17.82% | 24.49% | 101 |
-| Grade 4 — Proliferative DR | 65.31% | 38.55% | 48.48% | 166 |
+| Grade 0 — No DR | 81.78% | 92.02% | 86.60% | 927 |
+| Grade 1 — Mild NPDR | 58.18% | 22.38% | 32.32% | 143 |
+| Grade 2 — Moderate NPDR | 68.10% | 75.40% | 71.57% | 691 |
+| Grade 3 — Severe NPDR | 51.72% | 29.70% | 37.74% | 101 |
+| Grade 4 — Proliferative DR | 74.77% | 48.19% | 58.61% | 166 |
 
-KNN dramatically improves over the ordinal head on minority classes. Grade 3 recall jumps from 0% to 17.82%, and Grade 4 recall from 3% to 38.55%.
+KNN dramatically improves over the ordinal head on minority classes. Grade 3 recall jumps from 0% to 29.70%, and Grade 4 recall from 3% to 48.19%.
 
 ### 7.5 Test Set Results
 
@@ -360,7 +360,7 @@ The final KNN model was evaluated on a held-out test split:
 | Grade 3 | 63.04% | 25.00% | 35.80% | 116 |
 | Grade 4 | 64.58% | 41.06% | 50.20% | 151 |
 
-Test performance is consistent with validation (73.04% vs 69.97% accuracy, 0.7346 vs 0.6987 kappa), confirming no overfitting to the validation set. The improvement over earlier runs is attributed to the 50-epoch full training run with balanced loss from epoch 1 and the 224px image size.
+Test performance is consistent with validation (73.04% vs 74.75% accuracy, 0.7346 vs 0.7606 kappa), confirming no overfitting to the validation set. All results are reproducible from `notebooks/Merged_Train.ipynb`.
 
 ---
 
