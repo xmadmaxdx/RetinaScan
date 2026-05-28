@@ -344,23 +344,23 @@ The final KNN model was evaluated on a held-out test split:
 
 | Metric | Test Set |
 |--------|:--------:|
-| Accuracy | **69.80%** |
-| Quadratic Kappa | **0.7223** |
-| Spearman Correlation | 0.7350 |
-| F1 Macro | 48.69% |
-| F1 Weighted | 67.37% |
-| MAE | 0.4806 |
-| Off-by-1 | 83.33% |
+| Accuracy | **73.04%** |
+| Quadratic Kappa | **0.7346** |
+| Spearman Correlation | 0.7521 |
+| F1 Macro | 54.37% |
+| F1 Weighted | 70.91% |
+| MAE | 0.4383 |
+| Off-by-1 | 84.55% |
 
 | Class | Precision | Recall | F1 | Support |
 |-------|:--------:|:------:|:--:|:-------:|
-| Grade 0 | 79.15% | 88.70% | 83.65% | 929 |
-| Grade 1 | 44.90% | 15.28% | 22.80% | 144 |
-| Grade 2 | 62.55% | 70.85% | 66.44% | 693 |
-| Grade 3 | 35.42% | 14.66% | 20.73% | 116 |
-| Grade 4 | 59.09% | 43.05% | 49.81% | 151 |
+| Grade 0 | 81.67% | 89.24% | 85.29% | 929 |
+| Grade 1 | 59.18% | 20.14% | 30.05% | 144 |
+| Grade 2 | 64.81% | 77.34% | 70.53% | 693 |
+| Grade 3 | 63.04% | 25.00% | 35.80% | 116 |
+| Grade 4 | 64.58% | 41.06% | 50.20% | 151 |
 
-Test performance is consistent with validation (69.80% vs 69.97% accuracy, 0.7223 vs 0.6987 kappa), confirming no overfitting to the validation set.
+Test performance is consistent with validation (73.04% vs 69.97% accuracy, 0.7346 vs 0.6987 kappa), confirming no overfitting to the validation set. The improvement over earlier runs is attributed to the 50-epoch full training run with balanced loss from epoch 1 and the 224px image size.
 
 ---
 

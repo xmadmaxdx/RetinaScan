@@ -110,22 +110,22 @@ The KNN approach uses the projection head to extract 512-dim features, then clas
 
 | Metric | Value |
 |--------|:-----:|
-| Accuracy | 69.80% |
-| Quadratic Kappa | 0.7223 |
-| F1 Macro | 48.69% |
-| F1 Weighted | 67.37% |
-| MAE | 0.4806 |
-| Off-by-1 Accuracy | 83.33% |
+| Accuracy | **73.04%** |
+| Quadratic Kappa | **0.7346** |
+| F1 Macro | 54.37% |
+| F1 Weighted | 70.91% |
+| MAE | 0.4383 |
+| Off-by-1 Accuracy | 84.55% |
 
 ### Per-Class Performance (Test)
 
 | Class | Precision | Recall | F1 | Support |
 |-------|:--------:|:------:|:--:|:-------:|
-| Grade 0 — No DR | 79.15% | 88.70% | 83.65% | 929 |
-| Grade 1 — Mild NPDR | 44.90% | 15.28% | 22.80% | 144 |
-| Grade 2 — Moderate NPDR | 62.55% | 70.85% | 66.44% | 693 |
-| Grade 3 — Severe NPDR | 35.42% | 14.66% | 20.73% | 116 |
-| Grade 4 — Proliferative DR | 59.09% | 43.05% | 49.81% | 151 |
+| Grade 0 — No DR | 81.67% | 89.24% | 85.29% | 929 |
+| Grade 1 — Mild NPDR | 59.18% | 20.14% | 30.05% | 144 |
+| Grade 2 — Moderate NPDR | 64.81% | 77.34% | 70.53% | 693 |
+| Grade 3 — Severe NPDR | 63.04% | 25.00% | 35.80% | 116 |
+| Grade 4 — Proliferative DR | 64.58% | 41.06% | 50.20% | 151 |
 
 Grade 1 recall remains low, consistent with known inter-rater variability for mild NPDR. Grade 3 recall is limited by its position as a boundary class between moderate and proliferative.
 
